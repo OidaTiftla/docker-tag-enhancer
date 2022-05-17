@@ -12,6 +12,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('-s', '--src', required=True, type=str, help='The repository image to read from.')
 parser.add_argument('-d', '--dest', required=True, type=str, help='The repository image to push enhanced tags to.')
 parser.add_argument('-f', '--filter', type=str, help='A regex to filter the tags to process.')
+parser.add_argument('--only-new-tags', action='store_true', help='Only push new tags to destination.')
 parser.add_argument('--login', action='store_true', help='Perform a login (--registry is required).')
 parser.add_argument('-r', '--registry', type=str, help='The registry to login (defaults to docker.io).')
 
@@ -159,7 +160,8 @@ def mirror_image_tag(tag, dest_tag=None):
 
 # mirror all existing tags
 for src_tag in [str_version(t) for t in src_tags]:
-    mirror_image_tag(src_tag)
+    if not args.onlyNewTags or not src_tag in dest_tags:
+        mirror_image_tag(src_tag)
 
 for dest_tag in src_tags_latest.keys():
     mirror_image_tag(src_tags_latest[dest_tag], dest_tag)
