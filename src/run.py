@@ -86,6 +86,65 @@ def str_version(v):
         (v['rest'] or '')
 
 
+def compare_version(v1, v2):
+    if not v1 and not v2:
+        return 0
+    if not v1:
+        return -1
+    if not v2:
+        return 1
+
+    if not v1['rest'] == v2['rest'] \
+        or (v1['ce'] and not v2['ce']) \
+        or (not v1['ce'] and v2['ce']):
+        print('!!! cannot compare versions ' + str_version(v1) + ' and ' + str_version(v2))
+        exit(-1)
+
+    if int(v1['major']) < int(v2['major']):
+        return -1
+    elif int(v1['major']) > int(v2['major']):
+        return 1
+
+    if v1['minor'] and v2['minor']:
+        if int(v1['minor']) < int(v2['minor']):
+            return -1
+        elif int(v1['minor']) > int(v2['minor']):
+            return 1
+    elif v1['minor'] and not v2['minor']:
+        return -1
+    elif not v1['minor'] and v2['minor']:
+        return 1
+
+    if v1['patch'] and v2['patch']:
+        if int(v1['patch']) < int(v2['patch']):
+            return -1
+        elif int(v1['patch']) > int(v2['patch']):
+            return 1
+    elif v1['patch'] and not v2['patch']:
+        return -1
+    elif not v1['patch'] and v2['patch']:
+        return 1
+
+    if v1['rc'] and v2['rc']:
+        if int(v1['rc']) < int(v2['rc']):
+            return -1
+        elif int(v1['rc']) > int(v2['rc']):
+            return 1
+    elif v1['rc'] and not v2['rc']:
+        return -1
+    elif not v1['rc'] and v2['rc']:
+        return 1
+
+    if v1['ce'] and v2['ce']:
+        if int(v1['ce']) < int(v2['ce']):
+            return -1
+        elif int(v1['ce']) > int(v2['ce']):
+            return 1
+
+    # versions are equal
+    return 0
+
+
 def max_version(versions):
     latest = None
     for v in versions:
@@ -93,63 +152,8 @@ def max_version(versions):
             latest = v
             continue
 
-        if not v['rest'] == latest['rest'] \
-            or (v['ce'] and not latest['ce']) \
-            or (not v['ce'] and latest['ce']):
-            print('!!! max version could not be determined for ' + str_version(v) + ' and ' + str_version(latest))
-            exit(-1)
-
-        if int(v['major']) < int(latest['major']):
-            continue
-        elif int(v['major']) > int(latest['major']):
+        if compare_version(v, latest) > 0:
             latest = v
-            continue
-
-        if v['minor'] and latest['minor']:
-            if int(v['minor']) < int(latest['minor']):
-                continue
-            elif int(v['minor']) > int(latest['minor']):
-                latest = v
-                continue
-        elif v['minor'] and not latest['minor']:
-            continue
-        elif not v['minor'] and latest['minor']:
-            latest = v
-            continue
-
-        if v['patch'] and latest['patch']:
-            if int(v['patch']) < int(latest['patch']):
-                continue
-            elif int(v['patch']) > int(latest['patch']):
-                latest = v
-                continue
-        elif v['patch'] and not latest['patch']:
-            continue
-        elif not v['patch'] and latest['patch']:
-            latest = v
-            continue
-
-        if v['rc'] and latest['rc']:
-            if int(v['rc']) < int(latest['rc']):
-                continue
-            elif int(v['rc']) > int(latest['rc']):
-                latest = v
-                continue
-        elif v['rc'] and not latest['rc']:
-            continue
-        elif not v['rc'] and latest['rc']:
-            latest = v
-            continue
-
-        if v['ce'] and latest['ce']:
-            if int(v['ce']) < int(latest['ce']):
-                continue
-            elif int(v['ce']) > int(latest['ce']):
-                latest = v
-                continue
-
-        # versions are equal
-        latest = v
 
     return latest
 
