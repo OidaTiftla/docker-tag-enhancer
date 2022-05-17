@@ -217,6 +217,10 @@ def mirror_image_tag(tag, dest_tag=None):
     print('>>> Copy image tag from', src_image_tag, 'to', dest_image_tag)
     exec('skopeo copy --all ' + src_image_tag + ' ' + dest_image_tag)
 
+print('New calculated tags are:')
+for dest_tag in src_tags_latest.keys():
+    print('- ' + dest_tag + ' \t-> ' + src_tags_latest[dest_tag])
+
 # mirror all existing tags
 for src_tag in [str_version(t) for t in src_tags]:
     if not args.only_new_tags or not src_tag in dest_tags:
