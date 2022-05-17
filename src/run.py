@@ -210,8 +210,7 @@ def mirror_image_tag(tag, dest_tag=None):
     #     exec('skopeo' + opts + ' copy ' + src_image_tag + ' ' + dest_image_tag)
     #     exit(-1)
     print('>>> Copy image tag from', src_image_tag, 'to', dest_image_tag)
-    exec('skopeo --all copy ' + src_image_tag + ' ' + dest_image_tag)
-    exit(-1)
+    exec('skopeo copy --all ' + src_image_tag + ' ' + dest_image_tag)
 
 # mirror all existing tags
 for src_tag in [str_version(t) for t in src_tags]:
