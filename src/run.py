@@ -65,31 +65,86 @@ def to_full_image_url(url):
 
 
 def parse_version(text):
-    m = re.search(r'^(?P<major>0|[1-9]\d*)(?:\.(?P<minor>0|[1-9]\d*)(?:\.(?P<patch>0|[1-9]\d*))?)?(?P<rest>-.*)?$', text)
+    m = re.search(r'^(?P<major>0|[1-9]\d*)(?:\.(?P<minor>0|[1-9]\d*)(?:\.(?P<patch>0|[1-9]\d*))?)?(-((rc(?P<rc>0|[1-9]\d*)\.)?ce\.(?P<ce>0|[1-9]\d*)|rc(?P<rc>0|[1-9]\d*)))?(?P<rest>-.*)?$', text)
     if not m:
         return None
     return m.groupdict()
 
 
 def str_version(v):
-    return v['major'] + ('.' + v['minor'] if v['minor'] else '') + ('.' + v['patch'] if v['patch'] else '') + (v['rest'] or '')
+    return v['major'] + \
+        ('.' + v['minor'] if v['minor'] else '') + \
+        ('.' + v['patch'] if v['patch'] else '') + \
+        ('-rc' + v['rc'] + '.ce.' + v['ce'] if v['rc'] and v['ce'] else '') + \
+        ('-rc' + v['rc'] if v['rc'] else '') + \
+        ('-ce.' + v['ce'] if v['ce'] else '') + \
+        (v['rest'] or '')
 
 def max_version(versions):
     latest = None
     for v in versions:
         if not latest:
             latest = v
-        elif int(v['major']) > int(latest['major']):
-            latest = v
-        elif not v['minor'] or int(v['minor']) > int(latest['minor']):
-            latest = v
-        elif not v['patch'] or int(v['patch']) > int(latest['patch']):
-            latest = v
-        elif v['rest'] == latest['rest']:
-            latest = v
-        else:
+            continue
+
+        if not v['rest'] == latest['rest'] \
+            or (v['ce'] and not latest['ce']) \
+            or (not v['ce'] and latest['ce']):
             print('!!! max version could not be determined for ' + str_version(v) + ' and ' + str_version(latest))
             exit(-1)
+
+        if int(v['major']) < int(latest['major']):
+            continue
+        elif int(v['major']) > int(latest['major']):
+            latest = v
+            continue
+
+        if v['minor'] and latest['minor']:
+            if int(v['minor']) < int(latest['minor']):
+                continue
+            elif int(v['minor']) > int(latest['minor']):
+                latest = v
+                continue
+        elif v['minor'] and not latest['minor']:
+            continue
+        elif not v['minor'] and latest['minor']:
+            latest = v
+            continue
+
+        if v['patch'] and latest['patch']:
+            if int(v['patch']) < int(latest['patch']):
+                continue
+            elif int(v['patch']) > int(latest['patch']):
+                latest = v
+                continue
+        elif v['patch'] and not latest['patch']:
+            continue
+        elif not v['patch'] and latest['patch']:
+            latest = v
+            continue
+
+        if v['rc'] and latest['rc']:
+            if int(v['rc']) < int(latest['rc']):
+                continue
+            elif int(v['rc']) > int(latest['rc']):
+                latest = v
+                continue
+        elif v['rc'] and not latest['rc']:
+            continue
+        elif not v['rc'] and latest['rc']:
+            latest = v
+            continue
+
+        if v['ce'] and latest['ce']:
+            if int(v['ce']) < int(latest['ce']):
+                continue
+            elif int(v['ce']) > int(latest['ce']):
+                latest = v
+                continue
+
+        # versions are equal
+        latest = v
+
     return latest
 
 
