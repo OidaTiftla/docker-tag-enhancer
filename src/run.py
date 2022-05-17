@@ -80,9 +80,10 @@ def str_version(v):
         ('.' + v['minor'] if v['minor'] else '') + \
         ('.' + v['patch'] if v['patch'] else '') + \
         ('-rc' + v['rc'] + '.ce.' + v['ce'] if v['rc'] and v['ce'] else '') + \
-        ('-rc' + v['rc'] if v['rc'] else '') + \
-        ('-ce.' + v['ce'] if v['ce'] else '') + \
+        ('-rc' + v['rc'] if v['rc'] and not v['ce'] else '') + \
+        ('-ce.' + v['ce'] if not v['rc'] and v['ce'] else '') + \
         (v['rest'] or '')
+
 
 def max_version(versions):
     latest = None
