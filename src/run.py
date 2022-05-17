@@ -219,7 +219,7 @@ def mirror_image_tag(tag, dest_tag=None):
 
 # mirror all existing tags
 for src_tag in [str_version(t) for t in src_tags]:
-    if not args.onlyNewTags or not src_tag in dest_tags:
+    if not args.only_new_tags or not src_tag in dest_tags:
         mirror_image_tag(src_tag)
 
 for dest_tag in src_tags_latest.keys():
