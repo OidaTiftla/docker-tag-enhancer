@@ -65,10 +65,14 @@ def to_full_image_url(url):
 
 
 def parse_version(text):
-    m = re.search(r'^(?P<major>0|[1-9]\d*)(?:\.(?P<minor>0|[1-9]\d*)(?:\.(?P<patch>0|[1-9]\d*))?)?(-((rc(?P<rc>0|[1-9]\d*)\.)?ce\.(?P<ce>0|[1-9]\d*)|rc(?P<rc>0|[1-9]\d*)))?(?P<rest>-.*)?$', text)
+    m = re.search(r'^(?P<major>0|[1-9]\d*)(?:\.(?P<minor>0|[1-9]\d*)(?:\.(?P<patch>0|[1-9]\d*))?)?(-((rc(?P<rc>0|[1-9]\d*)\.)?ce\.(?P<ce>0|[1-9]\d*)|rc(?P<rc2>0|[1-9]\d*)))?(?P<rest>-.*)?$', text)
     if not m:
         return None
-    return m.groupdict()
+    result = m.groupdict()
+    if result['rc2']:
+        result['rc'] = result['rc2']
+    del result['rc2']
+    return result
 
 
 def str_version(v):
