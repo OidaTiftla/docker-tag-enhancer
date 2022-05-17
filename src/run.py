@@ -7,6 +7,7 @@ import subprocess
 import json
 # import semver
 from collections import defaultdict
+from functools import cmp_to_key
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-s', '--src', required=True, type=str, help='The repository image to read from.')
@@ -222,15 +223,20 @@ def mirror_image_tag(tag, dest_tag=None):
     print('>>> Copy image tag from', src_image_tag, 'to', dest_image_tag)
     exec('skopeo copy --all ' + src_image_tag + ' ' + dest_image_tag)
 
+src_tags_sorted = [t for t in src_tags]
+src_tags_sorted.sort(key=cmp_to_key(lambda x, y: compare_version(x, y)))
+src_tags_latest_sorted = [t for t in src_tags_latest.keys()]
+src_tags_latest_sorted.sort(key=cmp_to_key(lambda x, y: compare_version(None if x is None else parse_version(x), None if y is None else parse_version(y))))
+
 print('New calculated tags are:')
-for dest_tag in src_tags_latest.keys():
+for dest_tag in src_tags_latest_sorted:
     print('- ' + dest_tag + ' \t-> ' + src_tags_latest[dest_tag])
 
 if not args.no_copy:
     # mirror all existing tags
-    for src_tag in [str_version(t) for t in src_tags]:
+    for src_tag in [str_version(t) for t in src_tags_sorted]:
         if not args.only_new_tags or not src_tag in dest_tags:
             mirror_image_tag(src_tag)
 
-    for dest_tag in src_tags_latest.keys():
+    for dest_tag in src_tags_latest_sorted:
         mirror_image_tag(src_tags_latest[dest_tag], dest_tag)
