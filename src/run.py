@@ -164,10 +164,10 @@ if args.filter:
 src_tags = [parse_version(t) for t in src_tags]
 src_tags_grouped = defaultdict(list)
 for t in src_tags:
-    src_tags_grouped[t['major'] + (t['rest'] or '')].append(t)
+    src_tags_grouped[t['major'] + ('-ce' if t['ce'] else '') + (t['rest'] or '')].append(t)
 for t in src_tags:
     if t['minor']:
-        src_tags_grouped[t['major'] + '.' + t['minor'] + (t['rest'] or '')].append(t)
+        src_tags_grouped[t['major'] + '.' + t['minor'] + ('-ce' if t['ce'] else '') + (t['rest'] or '')].append(t)
 src_tags_latest = dict((k, str_version(max_version(src_tags_grouped[k]))) for k in src_tags_grouped.keys())
 
 dest_image = to_full_image_url(args.dest)
