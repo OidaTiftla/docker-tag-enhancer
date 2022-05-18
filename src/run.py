@@ -262,4 +262,5 @@ if not args.no_copy:
             mirror_image_tag(src_tag)
 
     for dest_tag in src_tags_latest_sorted:
-        mirror_image_tag(src_tags_latest[dest_tag], dest_tag)
+        if not args.only_new_tags or not dest_tag in dest_tags:
+            mirror_image_tag(src_tags_latest[dest_tag], dest_tag)
