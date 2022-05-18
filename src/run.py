@@ -28,8 +28,7 @@ args = parse_arguments()
 def exec(cmd, ignoreError=False):
     exit_code = os.system(cmd)
     if not ignoreError and exit_code != 0:
-        print('!!! Command \'' + cmd + '\' exited with: ' + str(exit_code))
-        exit(-1)
+        raise Exception('Command \'' + cmd + '\' exited with: ' + str(exit_code))
     return exit_code
 
 def execAndGetOutput(cmd):
@@ -100,8 +99,7 @@ def compare_version(v1, v2):
         or (not 'ce' in v1 and 'ce' in v2 and v2['ce']) \
         or ('ce' in v1 and 'ce' in v2 and v1['ce'] and not v2['ce']) \
         or ('ce' in v1 and 'ce' in v2 and not v1['ce'] and v2['ce']):
-        print('!!! cannot compare versions ' + str_version(v1) + ' and ' + str_version(v2))
-        exit(-1)
+        raise Exception('Cannot compare versions ' + str_version(v1) + ' and ' + str_version(v2))
 
     if int(v1['major']) < int(v2['major']):
         return -1
