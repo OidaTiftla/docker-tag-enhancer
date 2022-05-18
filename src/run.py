@@ -81,10 +81,10 @@ def str_version(v):
     return v['major'] + \
         ('.' + v['minor'] if v['minor'] else '') + \
         ('.' + v['patch'] if v['patch'] else '') + \
-        ('-rc' + v['rc'] + '.ce.' + v['ce'] if v['rc'] and v['ce'] else '') + \
-        ('-rc' + v['rc'] if v['rc'] and not v['ce'] else '') + \
-        ('-ce.' + v['ce'] if not v['rc'] and v['ce'] else '') + \
-        (v['rest'] or '')
+        ('-rc' + v['rc'] + '.ce.' + v['ce'] if 'rc' in v and v['rc'] and 'ce' in v and v['ce'] else '') + \
+        ('-rc' + v['rc'] if 'rc' in v and v['rc'] and ('ce' not in v or not v['ce']) else '') + \
+        ('-ce.' + v['ce'] if ('rc' not in v or not v['rc']) and 'ce' in v and v['ce'] else '') + \
+        ('rest' in v and v['rest'] or '')
 
 
 def compare_version(v1, v2):
@@ -95,9 +95,11 @@ def compare_version(v1, v2):
     if not v2:
         return 1
 
-    if not v1['rest'] == v2['rest'] \
-        or (v1['ce'] and not v2['ce']) \
-        or (not v1['ce'] and v2['ce']):
+    if ('rest' in v1 and 'rest' in v2 and not v1['rest'] == v2['rest']) \
+        or ('ce' in v1 and not 'ce' in v2 and v1['ce']) \
+        or (not 'ce' in v1 and 'ce' in v2 and v2['ce']) \
+        or ('ce' in v1 and 'ce' in v2 and v1['ce'] and not v2['ce']) \
+        or ('ce' in v1 and 'ce' in v2 and not v1['ce'] and v2['ce']):
         print('!!! cannot compare versions ' + str_version(v1) + ' and ' + str_version(v2))
         exit(-1)
 
@@ -136,7 +138,7 @@ def compare_version(v1, v2):
     elif not v1['rc'] and v2['rc']:
         return 1
 
-    if v1['ce'] and v2['ce']:
+    if 'ce' in v1 and 'ce' in v2 and v1['ce'] and v2['ce']:
         if int(v1['ce']) < int(v2['ce']):
             return -1
         elif int(v1['ce']) > int(v2['ce']):
@@ -163,7 +165,7 @@ src_image = to_full_image_url(args.src)
 print('>>> Read source tags for', src_image)
 inspectJson = execAndParseJson('skopeo inspect ' + src_image)
 src_tags = inspectJson['RepoTags']
-# src_tags = ['14.10.2', '14.10.3', '14.10', '14.11.1', '13.14.0', '13', '13-rc1-alpine', '13-rc2-alpine']
+# src_tags = ['14.10.2', '14.10.3', '14.10', '14.11.1-rc', '13.14.0', '13', '13-rc1-alpine', '13-rc2-alpine']
 src_tags = [t for t in src_tags if parse_version(t)]
 if args.filter:
     src_tags = [t for t in src_tags if re.search(args.filter, t)]
@@ -223,10 +225,24 @@ def mirror_image_tag(tag, dest_tag=None):
     print('>>> Copy image tag from', src_image_tag, 'to', dest_image_tag)
     exec('skopeo copy --all ' + src_image_tag + ' ' + dest_image_tag)
 
+
+def copy_with_exclude(o, exclude):
+    return {
+        k: o[k] for k in o.keys() if k not in exclude
+    }
+
+
+def prepare_for_sort(v):
+    v = copy_with_exclude(v, ['rest'])
+    if 'ce' in v and not v['ce']:
+        v['ce'] = '-1'
+    return v
+
+
 src_tags_sorted = [t for t in src_tags]
-src_tags_sorted.sort(key=cmp_to_key(lambda x, y: compare_version(x, y)))
+src_tags_sorted.sort(key=cmp_to_key(lambda x, y: compare_version(prepare_for_sort(x), prepare_for_sort(y))))
 src_tags_latest_sorted = [t for t in src_tags_latest.keys()]
-src_tags_latest_sorted.sort(key=cmp_to_key(lambda x, y: compare_version(None if x is None else parse_version(x), None if y is None else parse_version(y))))
+src_tags_latest_sorted.sort(key=cmp_to_key(lambda x, y: compare_version(None if x is None else prepare_for_sort(parse_version(x)), None if y is None else prepare_for_sort(parse_version(y)))))
 
 print('New calculated tags are:')
 for dest_tag in src_tags_latest_sorted:
