@@ -218,8 +218,19 @@ def mirror_image_tag(tag, dest_tag=None):
     #     print('>>> Copy image tag from', src_image_tag, 'to', dest_image_tag, '[options:' + opts + ']')
     #     exec('skopeo' + opts + ' copy ' + src_image_tag + ' ' + dest_image_tag)
     #     exit(-1)
-    print('>>> Copy image tag from', src_image_tag, 'to', dest_image_tag)
-    exec('skopeo copy --all ' + src_image_tag + ' ' + dest_image_tag)
+
+    inspectJson = execAndParseJson('skopeo inspect ' + src_image_tag)
+    src_digest = inspectJson['Digest']
+    try:
+        inspectJson = execAndParseJson('skopeo inspect ' + dest_image_tag)
+        dest_digest = inspectJson['Digest']
+    except:
+        dest_digest = None
+    if src_digest == dest_digest:
+        print('>>> Image tag is already up to date', dest_image_tag)
+    else:
+        print('>>> Copy image tag from', src_image_tag, 'to', dest_image_tag)
+        exec('skopeo copy --all ' + src_image_tag + ' ' + dest_image_tag)
 
 
 def copy_with_exclude(o, exclude):
