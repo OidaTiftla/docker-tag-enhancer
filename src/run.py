@@ -221,13 +221,19 @@ def mirror_image_tag(tag, dest_tag=None):
 
     inspectJson = execAndParseJson('skopeo inspect ' + src_image_tag)
     src_digest = inspectJson['Digest']
+    src_layers = inspectJson['Layers']
+    src_created = inspectJson['Created']
     try:
         inspectJson = execAndParseJson('skopeo inspect ' + dest_image_tag)
         dest_digest = inspectJson['Digest']
+        dest_layers = inspectJson['Layers']
+        dest_created = inspectJson['Created']
     except:
         dest_digest = None
     if src_digest == dest_digest:
-        print('>>> Image tag is already up to date', dest_image_tag)
+        print('>>> Image tag is already up to date (digests are equal)', dest_image_tag)
+    elif src_layers == dest_layers and src_created == dest_created:
+        print('>>> Image tag is already up to date (layers and created are equal)', dest_image_tag)
     else:
         print('>>> Copy image tag from', src_image_tag, 'to', dest_image_tag)
         exec('skopeo copy --all ' + src_image_tag + ' ' + dest_image_tag)
