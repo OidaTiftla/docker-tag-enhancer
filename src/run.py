@@ -191,9 +191,7 @@ def mirror_image_tag(tag, dest_tag=None):
     # }
 
     src_image_tag = src_image + ':' + tag
-    dest_image_tag = dest_image + ':' + tag
-    if dest_tag:
-        dest_image_tag = dest_image + ':' + dest_tag
+    dest_image_tag = dest_image + ':' + (dest_tag or tag)
     # print('>>> Read source platforms for', src_image_tag)
     # inspectJson = execAndParseJson('skopeo inspect --raw ' + src_image_tag)
     # if 'manifests' in inspectJson:
