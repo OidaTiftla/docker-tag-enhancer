@@ -3,11 +3,13 @@
 import os
 import argparse
 import re
+import sys
 import subprocess
 import json
 # import semver
 from collections import defaultdict
 from functools import cmp_to_key
+from time import sleep
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-s', '--src', required=True, type=str, help='The repository image to read from.')
@@ -32,8 +34,24 @@ def exec(cmd, ignoreError=False):
     return exit_code
 
 def execAndGetOutput(cmd):
-    output = subprocess.check_output(cmd, shell=True)
-    return output.decode('utf-8')
+    # source: https://stackoverflow.com/a/27661481
+    pipes = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    std_out, std_err = pipes.communicate()
+    std_out = std_out.decode(sys.getfilesystemencoding())
+    std_err = std_err.decode(sys.getfilesystemencoding())
+
+    if pipes.returncode != 0:
+        # an error happened!
+        raise Exception(pipes.returncode, std_out, std_err)
+
+    elif len(std_err):
+        # return code is 0 (no error), but we may want to
+        # do something with the info on std_err
+        # i.e. logger.warning(std_err)
+        print('>>!', std_err)
+
+    # do whatever you want with std_out
+    return std_out
 
 def execAndParseJson(cmd):
     output = execAndGetOutput(cmd)
@@ -219,26 +237,50 @@ def mirror_image_tag(tag, dest_tag=None):
     #     exec('skopeo' + opts + ' copy ' + src_image_tag + ' ' + dest_image_tag)
     #     exit(-1)
 
-    inspectJson = execAndParseJson('skopeo inspect ' + src_image_tag)
-    src_digest = inspectJson['Digest']
-    src_layers = inspectJson['Layers']
-    src_created = inspectJson['Created']
-    try:
-        inspectJson = execAndParseJson('skopeo inspect ' + dest_image_tag)
-        dest_digest = inspectJson['Digest']
-        dest_layers = inspectJson['Layers']
-        dest_created = inspectJson['Created']
-    except:
-        dest_digest = None
-        dest_layers = None
-        dest_created = None
+    while True:
+        try:
+            inspectJson = execAndParseJson('skopeo inspect ' + src_image_tag)
+            src_digest = inspectJson['Digest']
+            src_layers = inspectJson['Layers']
+            src_created = inspectJson['Created']
+            break
+        except BaseException as err:
+            print('>>> Failed, retrying in 5min:', err)
+            sleep(300)
+    while True:
+        try:
+            inspectJson = execAndParseJson('skopeo inspect ' + dest_image_tag)
+            dest_digest = inspectJson['Digest']
+            dest_layers = inspectJson['Layers']
+            dest_created = inspectJson['Created']
+            break
+        except BaseException as err:
+            if len(err.args) == 3:
+                exit_code, std_out, std_err = err.args
+                if 'Error reading manifest' in std_err \
+                    and 'manifest unknown' in std_err:
+                    dest_digest = None
+                    dest_layers = None
+                    dest_created = None
+                    break
+                print('>>> Failed, retrying in 5min:', std_out, std_err, 'Exit code:', exit_code)
+                sleep(300)
+                continue
+            print('>>> Failed, retrying in 5min:', err)
+            sleep(300)
     if src_digest == dest_digest:
         print('>>> Image tag is already up to date (digests are equal)', dest_image_tag)
     elif src_layers == dest_layers and src_created == dest_created:
         print('>>> Image tag is already up to date (layers and created are equal)', dest_image_tag)
     else:
         print('>>> Copy image tag from', src_image_tag, 'to', dest_image_tag)
-        exec('skopeo copy --all ' + src_image_tag + ' ' + dest_image_tag)
+        while True:
+            try:
+                exec('skopeo copy --all ' + src_image_tag + ' ' + dest_image_tag)
+                break
+            except BaseException as err:
+                print('>>> Failed, retrying in 5min:', err)
+                sleep(300)
 
 
 def copy_with_exclude(o, exclude):
