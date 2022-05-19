@@ -218,10 +218,23 @@ def max_version(versions):
     return latest
 
 
+def curl_get_all_from_pages_docker_hub(url):
+    result = []
+    while True:
+        json = execAndParseJsonWithRetry('curl -sSX GET "' + url + '"')
+        result += json['results']
+        url = json['next']
+        if not url:
+            return result
+
+
 src_image = to_full_image_url(args.src)
 print('>>> Read source tags for', src_image)
-inspectJson = execAndParseJsonWithRetry('skopeo inspect ' + src_image)
-src_tags = inspectJson['RepoTags']
+tags = curl_get_all_from_pages_docker_hub('https://hub.docker.com/v2/repositories/' + args.src + '/tags?page_size=100')
+src_tags_digests = {
+    x['name']: [i['digest'] for i in x['images'] if 'digest' in i] for x in tags
+}
+src_tags = [k for k, v in src_tags_digests.items() if len(v) > 0]
 # src_tags = ['14.10.2', '14.10.3', '14.10', '14.11.1-rc', '13.14.0', '13', '13-rc1-alpine', '13-rc2-alpine']
 src_tags = [t for t in src_tags if parse_version(t)]
 if args.filter:
@@ -237,8 +250,11 @@ src_tags_latest = dict((k, str_version(max_version(src_tags_grouped[k]))) for k 
 
 dest_image = to_full_image_url(args.dest)
 print('>>> Read destination tags for', dest_image)
-inspectJson = execAndParseJsonWithRetry('skopeo inspect ' + dest_image)
-dest_tags = inspectJson['RepoTags']
+tags = curl_get_all_from_pages_docker_hub('https://hub.docker.com/v2/repositories/' + args.dest + '/tags?page_size=100')
+dest_tags_digests = {
+    x['name']: [i['digest'] for i in x['images'] if 'digest' in i] for x in tags
+}
+dest_tags = [k for k, v in dest_tags_digests.items() if len(v) > 0]
 # dest_tags = ['14.10.2', '14.10.3', '14.10', '14.11.1', '13.14.0', '13']
 dest_tags = [t for t in dest_tags if parse_version(t)]
 
@@ -249,8 +265,10 @@ def mirror_image_tag(tag, dest_tag=None):
     #     'architecture': 'amd64',
     # }
 
-    src_image_tag = src_image + ':' + tag
-    dest_image_tag = dest_image + ':' + (dest_tag or tag)
+    src_tag = tag
+    dest_tag = (dest_tag or tag)
+    src_image_tag = src_image + ':' + src_tag
+    dest_image_tag = dest_image + ':' + dest_tag
     # print('>>> Read source platforms for', src_image_tag)
     # inspectJson = execAndParseJsonWithRetry('skopeo inspect --raw ' + src_image_tag)
     # if 'manifests' in inspectJson:
@@ -278,34 +296,10 @@ def mirror_image_tag(tag, dest_tag=None):
     #     exec('skopeo' + opts + ' copy ' + src_image_tag + ' ' + dest_image_tag)
     #     exit(-1)
 
-    inspectJson = execAndParseJsonWithRetry('skopeo inspect ' + src_image_tag)
-    src_digest = inspectJson['Digest']
-    src_layers = inspectJson['Layers']
-    src_created = inspectJson['Created']
-    while True:
-        try:
-            inspectJson = execAndParseJsonWithRetryRateLimit('skopeo inspect ' + dest_image_tag)
-            dest_digest = inspectJson['Digest']
-            dest_layers = inspectJson['Layers']
-            dest_created = inspectJson['Created']
-            break
-        except KeyboardInterrupt:
-            raise
-        except BaseException as err:
-            if len(err.args) == 3:
-                exit_code, std_out, std_err = err.args
-                if 'Error reading manifest' in std_err \
-                    and 'manifest unknown' in std_err:
-                    dest_digest = None
-                    dest_layers = None
-                    dest_created = None
-                    break
-            print('>>> Failed, retrying in 5min:', err)
-            sleep(300)
+    src_digest = src_tags_digests[src_tag]
+    dest_digest = dest_tags_digests[dest_tag] if dest_tag in dest_tags_digests else None
     if src_digest == dest_digest:
         print('>>> Image tag is already up to date (digests are equal)', dest_image_tag)
-    elif src_layers == dest_layers and src_created == dest_created:
-        print('>>> Image tag is already up to date (layers and created are equal)', dest_image_tag)
     else:
         print('>>> Copy image tag from', src_image_tag, 'to', dest_image_tag)
         execWithRetry('skopeo copy --all ' + src_image_tag + ' ' + dest_image_tag)
