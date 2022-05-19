@@ -230,6 +230,8 @@ def mirror_image_tag(tag, dest_tag=None):
         dest_created = inspectJson['Created']
     except:
         dest_digest = None
+        dest_layers = None
+        dest_created = None
     if src_digest == dest_digest:
         print('>>> Image tag is already up to date (digests are equal)', dest_image_tag)
     elif src_layers == dest_layers and src_created == dest_created:
