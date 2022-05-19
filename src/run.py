@@ -28,37 +28,78 @@ args = parse_arguments()
 
 
 def exec(cmd, ignoreError=False):
-    exit_code = os.system(cmd)
-    if not ignoreError and exit_code != 0:
-        raise Exception('Command \'' + cmd + '\' exited with: ' + str(exit_code))
-    return exit_code
-
-def execAndGetOutput(cmd):
     # source: https://stackoverflow.com/a/27661481
     pipes = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     std_out, std_err = pipes.communicate()
+    exit_code = pipes.returncode
     std_out = std_out.decode(sys.getfilesystemencoding())
     std_err = std_err.decode(sys.getfilesystemencoding())
 
-    if pipes.returncode != 0:
+    if not ignoreError and exit_code != 0:
         # an error happened!
-        raise Exception(pipes.returncode, std_out, std_err)
+        raise Exception(exit_code, std_out, std_err)
 
-    elif len(std_err):
+    elif not ignoreError and len(std_err):
         # return code is 0 (no error), but we may want to
         # do something with the info on std_err
         # i.e. logger.warning(std_err)
         print('>>!', std_err)
 
     # do whatever you want with std_out
-    return std_out
+    return exit_code, std_out, std_err
+
+
+def withRetryRateLimit(func):
+    while True:
+        try:
+            return func()
+        except KeyboardInterrupt:
+            raise
+        except BaseException as err:
+            if len(err.args) == 3:
+                exit_code, std_out, std_err = err.args
+                if 'toomanyrequests' in std_err:
+                    print('>>> Rate limit reached, retrying in 15min:', std_out, std_err, 'Exit code:', exit_code)
+                    sleep(900)
+                    continue
+            raise
+
+
+def withRetry(func):
+    while True:
+        try:
+            return withRetryRateLimit(func)
+        except KeyboardInterrupt:
+            raise
+        except BaseException as err:
+            print('>>> Failed, retrying in 5min:', err)
+            sleep(300)
+
+
+def execWithRetryRateLimit(cmd):
+    return withRetryRateLimit(lambda: exec(cmd))
+
+
+def execWithRetry(cmd):
+    return withRetry(lambda: exec(cmd))
+
 
 def execAndParseJson(cmd):
-    output = execAndGetOutput(cmd)
-    return json.loads(output)
+    exit_code, std_out, std_err = exec(cmd)
+    return json.loads(std_out)
+
+
+def execAndParseJsonWithRetryRateLimit(cmd):
+    return withRetryRateLimit(lambda: execAndParseJson(cmd))
+
+
+def execAndParseJsonWithRetry(cmd):
+    return withRetry(lambda: execAndParseJson(cmd))
+
 
 def escapeParamSingleQuotes(param):
     return param.replace('`', '\\`').replace('\'', '\'"\'"\'')
+
 
 def escapeParamDoubleQuotes(param):
     return param.replace('`', '\\`').replace('"', '"\'"\'"')
@@ -179,7 +220,7 @@ def max_version(versions):
 
 src_image = to_full_image_url(args.src)
 print('>>> Read source tags for', src_image)
-inspectJson = execAndParseJson('skopeo inspect ' + src_image)
+inspectJson = execAndParseJsonWithRetry('skopeo inspect ' + src_image)
 src_tags = inspectJson['RepoTags']
 # src_tags = ['14.10.2', '14.10.3', '14.10', '14.11.1-rc', '13.14.0', '13', '13-rc1-alpine', '13-rc2-alpine']
 src_tags = [t for t in src_tags if parse_version(t)]
@@ -196,7 +237,7 @@ src_tags_latest = dict((k, str_version(max_version(src_tags_grouped[k]))) for k 
 
 dest_image = to_full_image_url(args.dest)
 print('>>> Read destination tags for', dest_image)
-inspectJson = execAndParseJson('skopeo inspect ' + dest_image)
+inspectJson = execAndParseJsonWithRetry('skopeo inspect ' + dest_image)
 dest_tags = inspectJson['RepoTags']
 # dest_tags = ['14.10.2', '14.10.3', '14.10', '14.11.1', '13.14.0', '13']
 dest_tags = [t for t in dest_tags if parse_version(t)]
@@ -211,14 +252,14 @@ def mirror_image_tag(tag, dest_tag=None):
     src_image_tag = src_image + ':' + tag
     dest_image_tag = dest_image + ':' + (dest_tag or tag)
     # print('>>> Read source platforms for', src_image_tag)
-    # inspectJson = execAndParseJson('skopeo inspect --raw ' + src_image_tag)
+    # inspectJson = execAndParseJsonWithRetry('skopeo inspect --raw ' + src_image_tag)
     # if 'manifests' in inspectJson:
     #     platforms = [m['platform'] for m in inspectJson['manifests'] if 'platform' in m]
     # else:
     #     platforms = []
     # if len(platforms) <= 0:
     #     print('>>> No platforms found in manifest, try get it from image')
-    #     inspectJson = execAndParseJson('skopeo inspect ' + src_image_tag)
+    #     inspectJson = execAndParseJsonWithRetry('skopeo inspect ' + src_image_tag)
     #     if 'Architecture' in inspectJson:
     #         default_platform['architecture'] = inspectJson['Architecture']
     #     if 'Os' in inspectJson:
@@ -237,23 +278,19 @@ def mirror_image_tag(tag, dest_tag=None):
     #     exec('skopeo' + opts + ' copy ' + src_image_tag + ' ' + dest_image_tag)
     #     exit(-1)
 
+    inspectJson = execAndParseJsonWithRetry('skopeo inspect ' + src_image_tag)
+    src_digest = inspectJson['Digest']
+    src_layers = inspectJson['Layers']
+    src_created = inspectJson['Created']
     while True:
         try:
-            inspectJson = execAndParseJson('skopeo inspect ' + src_image_tag)
-            src_digest = inspectJson['Digest']
-            src_layers = inspectJson['Layers']
-            src_created = inspectJson['Created']
-            break
-        except BaseException as err:
-            print('>>> Failed, retrying in 5min:', err)
-            sleep(300)
-    while True:
-        try:
-            inspectJson = execAndParseJson('skopeo inspect ' + dest_image_tag)
+            inspectJson = execAndParseJsonWithRetryRateLimit('skopeo inspect ' + dest_image_tag)
             dest_digest = inspectJson['Digest']
             dest_layers = inspectJson['Layers']
             dest_created = inspectJson['Created']
             break
+        except KeyboardInterrupt:
+            raise
         except BaseException as err:
             if len(err.args) == 3:
                 exit_code, std_out, std_err = err.args
@@ -263,9 +300,6 @@ def mirror_image_tag(tag, dest_tag=None):
                     dest_layers = None
                     dest_created = None
                     break
-                print('>>> Failed, retrying in 5min:', std_out, std_err, 'Exit code:', exit_code)
-                sleep(300)
-                continue
             print('>>> Failed, retrying in 5min:', err)
             sleep(300)
     if src_digest == dest_digest:
@@ -274,13 +308,7 @@ def mirror_image_tag(tag, dest_tag=None):
         print('>>> Image tag is already up to date (layers and created are equal)', dest_image_tag)
     else:
         print('>>> Copy image tag from', src_image_tag, 'to', dest_image_tag)
-        while True:
-            try:
-                exec('skopeo copy --all ' + src_image_tag + ' ' + dest_image_tag)
-                break
-            except BaseException as err:
-                print('>>> Failed, retrying in 5min:', err)
-                sleep(300)
+        execWithRetry('skopeo copy --all ' + src_image_tag + ' ' + dest_image_tag)
 
 
 def copy_with_exclude(o, exclude):
