@@ -1,1 +1,1 @@
-git+https://github.com/OidaTiftla/python-semver.git@parsing-allow-shorter-versions
+git+https://github.com/python-semver/python-semver.git@master
