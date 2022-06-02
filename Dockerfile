@@ -9,4 +9,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY src .
 
-ENTRYPOINT [ "python", "./run.py" ]
+ENTRYPOINT [ "python", "-u", "./run.py" ]
