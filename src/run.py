@@ -271,6 +271,7 @@ def retrieve_new_token(api, scope=None):
             }
             url = 'https://auth.docker.io/token'
             r = requests.get(url, params=params)
+            r.raise_for_status()
             json = r.json()
             token = json['token']
             token_cache[cache_key] = token
@@ -303,6 +304,7 @@ def request_docker_registry(api, name, pathAndQuery):
             token = retrieve_new_token(api, scope)
         else:
             break
+    r.raise_for_status()
     json = r.json()
     return json['tags']
 
