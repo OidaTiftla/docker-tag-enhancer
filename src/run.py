@@ -10,6 +10,7 @@ import json
 from collections import defaultdict
 from functools import cmp_to_key
 from time import sleep
+from pathlib import Path
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-s', '--src', required=True, type=str, help='The repository image to read from.')
@@ -257,7 +258,7 @@ DOCKER_HOSTS = [
 token_cache = {}
 
 
-def retrieve_new_token(api, scope=None):
+def retrieve_new_token(api, scope=None, auth=None):
     cache_key = api + '+' + scope
 
     if scope is None:
@@ -270,7 +271,20 @@ def retrieve_new_token(api, scope=None):
                 'scope': scope
             }
             url = 'https://auth.docker.io/token'
-            r = requests.get(url, params=params)
+            r = requests.get(url, params=params, auth=auth)
+            r.raise_for_status()
+            o = r.json()
+            token = o['token']
+            token_cache[cache_key] = token
+            return token
+
+        case 'registry.gitlab.com':
+            params = {
+                'service': 'container_registry',
+                'scope': scope
+            }
+            url = 'https://gitlab.com/jwt/auth'
+            r = requests.get(url, params=params, auth=auth)
             r.raise_for_status()
             o = r.json()
             token = o['token']
@@ -280,19 +294,20 @@ def retrieve_new_token(api, scope=None):
     return None
 
 
-def get_or_retrieve_token(api, scope=None):
+def get_or_retrieve_token(api, scope=None, auth=None):
     cache_key = api + '+' + scope
 
     if cache_key in token_cache:
         return token_cache[cache_key]
 
-    return retrieve_new_token(api, scope)
+    return retrieve_new_token(api, scope, auth=auth)
 
 
-def request_docker_registry(api, name, pathAndQuery):
+def request_docker_registry(api, name, pathAndQuery, auth=None):
     url = 'https://' + api + '/v2/' + name + '/' + pathAndQuery
     scope = 'repository:' + name + ':pull,push'
-    token = get_or_retrieve_token(api, scope)
+    token = get_or_retrieve_token(api, scope, auth=auth)
+
     i = 0
     while True:
         i += 1
@@ -300,13 +315,36 @@ def request_docker_registry(api, name, pathAndQuery):
         if token is not None:
             headers['Authorization'] = 'Bearer ' + token
         r = requests.get(url, headers=headers)
-        if r.status_code == 401 and i == 0:
-            token = retrieve_new_token(api, scope)
+        # Unauthorized?
+        if r.status_code == 401 and i <= 1:
+            token = retrieve_new_token(api, scope, auth=auth)
         else:
             break
+
     r.raise_for_status()
     o = r.json()
     return o['tags']
+
+
+def get_auth_from_config(api):
+    config = str(Path('~/.docker/config.json').expanduser())
+    with open(config) as reader:
+        content = reader.read()
+
+    o = json.loads(content)
+    auths = o['auths']
+
+    search = [api]
+    if api in DOCKER_HOSTS:
+        search = DOCKER_HOSTS
+
+    for k, v in auths.items():
+        if k in search and 'auth' in v:
+            login = base64.b64decode(v['auth']).decode('utf-8')
+            parts = login.split(':', 1)
+            return (parts[0], parts[1])
+
+    return None
 
 
 src_image = to_full_image_url(args.src)
@@ -319,7 +357,7 @@ if src_api in DOCKER_HOSTS:
     src_api = 'registry.docker.com'
 
 print('>>> Read source tags for', src_image)
-tags = request_docker_registry(src_api, src_name, 'tags/list')
+tags = request_docker_registry(src_api, src_name, 'tags/list', auth=get_auth_from_config(src_api))
 src_tags_digests = {
     x['name']: [i['digest'] for i in x['images'] if 'digest' in i] for x in tags
 }
@@ -347,7 +385,7 @@ if dest_api in DOCKER_HOSTS:
     dest_api = 'registry.docker.com'
 
 print('>>> Read destination tags for', dest_image)
-tags = request_docker_registry(dest_api, dest_name, 'tags/list')
+tags = request_docker_registry(dest_api, dest_name, 'tags/list', auth=get_auth_from_config(dest_api))
 dest_tags_digests = {
     x['name']: [i['digest'] for i in x['images'] if 'digest' in i] for x in tags
 }
