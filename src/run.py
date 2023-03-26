@@ -235,9 +235,9 @@ def max_version(versions):
 def curl_get_all_from_pages_docker_hub(url):
     result = []
     while True:
-        json = execAndParseJsonWithRetry('curl -sSX GET "' + url + '"')
-        result += json['results']
-        url = json['next']
+        o = execAndParseJsonWithRetry('curl -sSX GET "' + url + '"')
+        result += o['results']
+        url = o['next']
         if not url:
             return result
 
@@ -272,8 +272,8 @@ def retrieve_new_token(api, scope=None):
             url = 'https://auth.docker.io/token'
             r = requests.get(url, params=params)
             r.raise_for_status()
-            json = r.json()
-            token = json['token']
+            o = r.json()
+            token = o['token']
             token_cache[cache_key] = token
             return token
 
@@ -305,8 +305,8 @@ def request_docker_registry(api, name, pathAndQuery):
         else:
             break
     r.raise_for_status()
-    json = r.json()
-    return json['tags']
+    o = r.json()
+    return o['tags']
 
 
 src_image = to_full_image_url(args.src)
