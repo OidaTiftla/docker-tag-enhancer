@@ -4,6 +4,7 @@ import argparse
 import re
 import sys
 import subprocess
+import requests
 import json
 # import semver
 from collections import defaultdict
@@ -113,14 +114,28 @@ if args.login:
     exec('skopeo login ' + registry)
     exit(0)
 
+
 def to_full_image_url(url):
-    if url.count('/') <= 1:
+    if '.' not in url:
         url = 'docker.io/' + url
     if url.startswith('docker.io/'):
         url = 'index.' + url
     if not url.startswith('docker://'):
         url = 'docker://' + url
     return url
+
+
+def parse_image_url(url):
+    url = to_full_image_url(url)
+    m = re.search(r'^(?P<protocol>[^:]*)://(?P<host>[^/]*)/(?P<name>[^:]*)(?::(?P<tag>.*))?$', url)
+    if not m:
+        return None
+    result = m.groupdict()
+    if '/' not in result['name']:
+        result['name'] = 'library/' + result['name']
+    if result['name'].startswith('_/'):
+        result['name'] = 'library/' + result['name'][2:]
+    return result
 
 
 def parse_version(text):
@@ -227,9 +242,82 @@ def curl_get_all_from_pages_docker_hub(url):
             return result
 
 
+DOCKER_HOSTS = [
+    'index.docker.io',
+    'index.docker.com',
+    'registry.docker.io',
+    'registry.docker.com',
+    'registry-1.docker.io',
+    'registry-1.docker.com',
+    'docker.io',
+    'docker.com',
+]
+
+
+token_cache = {}
+
+
+def retrieve_new_token(api, scope=None):
+    cache_key = api + '+' + scope
+
+    if scope is None:
+        scope = 'repository::pull,push'
+
+    match api:
+        case item if item in DOCKER_HOSTS:
+            params = {
+                'service': 'registry.docker.io',
+                'scope': scope
+            }
+            url = 'https://auth.docker.io/token'
+            r = requests.get(url, params=params)
+            json = r.json()
+            token = json['token']
+            token_cache[cache_key] = token
+            return token
+
+    return None
+
+
+def get_or_retrieve_token(api, scope=None):
+    cache_key = api + '+' + scope
+
+    if cache_key in token_cache:
+        return token_cache[cache_key]
+
+    return retrieve_new_token(api, scope)
+
+
+def request_docker_registry(api, name, pathAndQuery):
+    url = 'https://' + api + '/v2/' + name + '/' + pathAndQuery
+    scope = 'repository:' + name + ':pull,push'
+    token = get_or_retrieve_token(api, scope)
+    i = 0
+    while True:
+        i += 1
+        headers = {}
+        if token is not None:
+            headers['Authorization'] = 'Bearer ' + token
+        r = requests.get(url, headers=headers)
+        if r.status_code == 401 and i == 0:
+            token = retrieve_new_token(api, scope)
+        else:
+            break
+    json = r.json()
+    return json['tags']
+
+
 src_image = to_full_image_url(args.src)
+src_url = parse_image_url(args.src)
+src_host = src_url['host']
+src_protocol = src_url['protocol']
+src_name = src_url['name']
+src_api = src_host
+if src_api in DOCKER_HOSTS:
+    src_api = 'registry.docker.com'
+
 print('>>> Read source tags for', src_image)
-tags = curl_get_all_from_pages_docker_hub('https://hub.docker.com/v2/repositories/' + args.src + '/tags?page_size=100')
+tags = request_docker_registry(src_api, src_name, 'tags/list')
 src_tags_digests = {
     x['name']: [i['digest'] for i in x['images'] if 'digest' in i] for x in tags
 }
@@ -248,8 +336,16 @@ for t in src_tags:
 src_tags_latest = dict((k, str_version(max_version(src_tags_grouped[k]))) for k in src_tags_grouped.keys())
 
 dest_image = to_full_image_url(args.dest)
+dest_url = parse_image_url(args.dest)
+dest_host = dest_url['host']
+dest_protocol = dest_url['protocol']
+dest_name = dest_url['name']
+dest_api = dest_host
+if dest_api in DOCKER_HOSTS:
+    dest_api = 'registry.docker.com'
+
 print('>>> Read destination tags for', dest_image)
-tags = curl_get_all_from_pages_docker_hub('https://hub.docker.com/v2/repositories/' + args.dest + '/tags?page_size=100')
+tags = request_docker_registry(dest_api, dest_name, 'tags/list')
 dest_tags_digests = {
     x['name']: [i['digest'] for i in x['images'] if 'digest' in i] for x in tags
 }
