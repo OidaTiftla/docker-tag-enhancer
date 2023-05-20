@@ -4,14 +4,16 @@ Add major and major.minor tags to docker images that have only major.minor.patch
 
 ## Usage
 
+### Login
+
 ```bash
-docker run --rm -it -v /home/umars/.docker/config.json:/root/.docker/config.json oidatiftla/docker-tag-enhancer -s gitlab/gitlab-ce -d oidatiftla/gitlab-ce -f '^((?!-rc|^8\.|^9\.|^10\.|^11\.|^12\.).)*$'; date
+docker run --rm -it -v ~/.docker/config.json:/root/.docker/config.json oidatiftla/docker-tag-enhancer --login --registry registry.example.com
 ```
 
-Or run from source:
+### With filter
 
 ```bash
-docker build --pull -t dte . && docker run --rm -it -v /home/umars/.docker/config.json:/root/.docker/config.json dte -s gitlab/gitlab-ce -d oidatiftla/gitlab-ce -f '^((?!-rc|^8\.|^9\.|^10\.|^11\.|^12\.).)*$'; date
+docker run --rm -it -v ~/.docker/config.json:/root/.docker/config.json oidatiftla/docker-tag-enhancer -s registry.example.com/name1 -d registry.example.com/name2 -f '^((?!-rc|^8\.|^9\.|^10\.|^11\.|^12\.).)*$'
 ```
 
 ## Build from source
