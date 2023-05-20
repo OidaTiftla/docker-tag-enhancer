@@ -444,10 +444,26 @@ def mirror_image_tag(tag, dest_tag=None):
     #     exec('skopeo' + opts + ' copy ' + src_image_tag + ' ' + dest_image_tag)
     #     exit(-1)
 
-    src_manifests = request_docker_registry(src_api, src_name, 'manifests/' + src_tag, headers={'Accept': 'application/vnd.docker.distribution.manifest.v2+json'})
-    src_digest = src_manifests['fsLayers'] if src_manifests['schemaVersion'] == 1 else src_manifests['config']['digest']
-    dest_manifests = request_docker_registry(dest_api, dest_name, 'manifests/' + dest_tag, headers={'Accept': 'application/vnd.docker.distribution.manifest.v2+json'}) if dest_tag in dest_tags else None
-    dest_digest = dest_manifests['fsLayers'] if dest_manifests and dest_manifests['schemaVersion'] == 1 else dest_manifests['config']['digest'] if dest_manifests else None
+    try:
+        src_manifests = request_docker_registry(src_api, src_name, 'manifests/' + src_tag, headers={'Accept': 'application/vnd.docker.distribution.manifest.v2+json'})
+        src_digest = src_manifests['fsLayers'] if src_manifests['schemaVersion'] == 1 else src_manifests['config']['digest']
+    except requests.exceptions.HTTPError as err:
+        if err.response.status_code == 404:
+            src_manifests = request_docker_registry(src_api, src_name, 'manifests/' + src_tag, headers={'Accept': 'application/vnd.oci.image.index.v1+json'})
+            src_digest = [x['digest'] for x in src_manifests['manifests']]
+        else:
+            raise err
+
+    try:
+        dest_manifests = request_docker_registry(dest_api, dest_name, 'manifests/' + dest_tag, headers={'Accept': 'application/vnd.docker.distribution.manifest.v2+json'}) if dest_tag in dest_tags else None
+        dest_digest = dest_manifests['fsLayers'] if dest_manifests and dest_manifests['schemaVersion'] == 1 else dest_manifests['config']['digest'] if dest_manifests else None
+    except requests.exceptions.HTTPError as err:
+        if err.response.status_code == 404:
+            dest_manifests = request_docker_registry(dest_api, dest_name, 'manifests/' + dest_tag, headers={'Accept': 'application/vnd.oci.image.index.v1+json'})
+            dest_digest = [x['digest'] for x in dest_manifests['manifests']]
+        else:
+            raise err
+
     if src_digest == dest_digest:
         print('>>> Image tag is already up to date (digests are equal)', dest_image_tag)
     else:
