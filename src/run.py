@@ -2,15 +2,20 @@
 
 import argparse
 import re
+import os
 import sys
 import subprocess
 import requests
 import json
+import base64
+import www_authenticate
 # import semver
 from collections import defaultdict
 from functools import cmp_to_key
 from time import sleep
 from pathlib import Path
+from case_insensitive_dict import CaseInsensitiveDict
+from getpass import getpass
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-s', '--src', required=True, type=str, help='The repository image to read from.')
@@ -28,10 +33,13 @@ def parse_arguments():
 args = parse_arguments()
 
 
-def exec(cmd, ignoreError=False):
+docker_config_auth_file = str(Path('~/.docker/config.json').expanduser())
+
+
+def exec(cmd, ignoreError=False, input=None):
     # source: https://stackoverflow.com/a/27661481
-    pipes = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    std_out, std_err = pipes.communicate()
+    pipes = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE)
+    std_out, std_err = pipes.communicate(input=input.encode())
     exit_code = pipes.returncode
     std_out = std_out.decode(sys.getfilesystemencoding())
     std_err = std_err.decode(sys.getfilesystemencoding())
@@ -106,14 +114,36 @@ def escapeParamDoubleQuotes(param):
     return param.replace('`', '\\`').replace('"', '"\'"\'"')
 
 
+DOCKER_HOSTS = [
+    'index.docker.io',
+    'index.docker.com',
+    'registry.docker.io',
+    'registry.docker.com',
+    'registry-1.docker.io',
+    'registry-1.docker.com',
+    'docker.io',
+    'docker.com',
+]
+
+
 if args.login:
     registry = args.registry
     if not registry:
         registry = 'docker.io'
-    if registry == 'docker.io':
-        registry = 'index.' + registry
-    exec('skopeo login ' + registry)
-    exit(0)
+    if registry in DOCKER_HOSTS:
+        registry = 'docker.io'
+    print('Username: ', end='')
+    username = input()
+    password = getpass()
+    exit_code, std_out, std_err = exec('skopeo login --authfile ' + docker_config_auth_file + ' -u ' + escapeParamSingleQuotes(username) + ' --password-stdin ' + registry, ignoreError=True, input=password)
+    if exit_code == 0:
+        print('Login successful')
+        exit(0)
+    else:
+        if len(std_out) > 0:
+            print(std_out)
+        print(std_err, end='')
+        exit(-1)
 
 
 def to_full_image_url(url):
@@ -123,6 +153,9 @@ def to_full_image_url(url):
         url = 'index.' + url
     if not url.startswith('docker://'):
         url = 'docker://' + url
+    for host in DOCKER_HOSTS:
+        if url.startswith('docker://' + host + '/'):
+            url = url.replace('docker://' + host + '/', 'docker://index.docker.io/', 1)
     return url
 
 
@@ -243,81 +276,57 @@ def curl_get_all_from_pages_docker_hub(url):
             return result
 
 
-DOCKER_HOSTS = [
-    'index.docker.io',
-    'index.docker.com',
-    'registry.docker.io',
-    'registry.docker.com',
-    'registry-1.docker.io',
-    'registry-1.docker.com',
-    'docker.io',
-    'docker.com',
-]
-
-
 token_cache = {}
 
 
-def retrieve_new_token(api, scope=None, auth=None):
-    cache_key = api + '+' + scope
+def retrieve_new_token(api, name, wwwAuthenticateHeader):
+    cache_key = api + '+' + name
 
-    if scope is None:
-        scope = 'repository::pull,push'
-
-    match api:
-        case item if item in DOCKER_HOSTS:
-            params = {
-                'service': 'registry.docker.io',
-                'scope': scope
-            }
-            url = 'https://auth.docker.io/token'
-            r = requests.get(url, params=params, auth=auth)
-            r.raise_for_status()
-            o = r.json()
-            token = o['token']
-            token_cache[cache_key] = token
-            return token
-
-        case 'registry.gitlab.com':
-            params = {
-                'service': 'container_registry',
-                'scope': scope
-            }
-            url = 'https://gitlab.com/jwt/auth'
-            r = requests.get(url, params=params, auth=auth)
-            r.raise_for_status()
-            o = r.json()
-            token = o['token']
-            token_cache[cache_key] = token
-            return token
-
-    return None
+    parsed = www_authenticate.parse(wwwAuthenticateHeader)
+    if len(parsed) != 1:
+        return None
+    authType = [x for x in parsed.keys()][0]
+    parsed = CaseInsensitiveDict[str, str](data=parsed[authType])
+    url = parsed.pop('realm')
+    params = parsed
+    auth = get_auth_from_config(api)
+    r = requests.get(url, params=params, auth=auth)
+    r.raise_for_status()
+    o = r.json()
+    token = authType + ' ' + o['token']
+    token_cache[cache_key] = token
+    return token
 
 
-def get_or_retrieve_token(api, scope=None, auth=None):
-    cache_key = api + '+' + scope
+def get_or_retrieve_token(api, name, wwwAuthenticateHeader=None):
+    cache_key = api + '+' + name
 
     if cache_key in token_cache:
         return token_cache[cache_key]
 
-    return retrieve_new_token(api, scope, auth=auth)
+    if wwwAuthenticateHeader is None:
+        return None
+
+    return retrieve_new_token(api, name, wwwAuthenticateHeader)
 
 
-def request_docker_registry(api, name, pathAndQuery, auth=None):
+def request_docker_registry(api, name, pathAndQuery):
     url = 'https://' + api + '/v2/' + name + '/' + pathAndQuery
-    scope = 'repository:' + name + ':pull,push'
-    token = get_or_retrieve_token(api, scope, auth=auth)
+    token = get_or_retrieve_token(api, name)
 
     i = 0
     while True:
         i += 1
         headers = {}
         if token is not None:
-            headers['Authorization'] = 'Bearer ' + token
+            headers['Authorization'] = token
         r = requests.get(url, headers=headers)
         # Unauthorized?
         if r.status_code == 401 and i <= 1:
-            token = retrieve_new_token(api, scope, auth=auth)
+            headers = CaseInsensitiveDict[str, str](data=r.headers)
+            if 'www-authenticate' not in headers:
+                break
+            token = retrieve_new_token(api, name, headers['www-authenticate'])
         else:
             break
 
@@ -327,22 +336,32 @@ def request_docker_registry(api, name, pathAndQuery, auth=None):
 
 
 def get_auth_from_config(api):
-    config = str(Path('~/.docker/config.json').expanduser())
-    with open(config) as reader:
+    if not os.path.isfile(docker_config_auth_file):
+        return None
+
+    with open(docker_config_auth_file) as reader:
         content = reader.read()
 
     o = json.loads(content)
+    if 'auths' not in o:
+        return None
     auths = o['auths']
 
-    search = [api]
-    if api in DOCKER_HOSTS:
-        search = DOCKER_HOSTS
+    if api in auths \
+        and 'auth' in auths[api]:
+        print('Use login for ' + api)
+        login = base64.b64decode(auths[api]['auth']).decode('utf-8')
+        parts = login.split(':', 1)
+        return (parts[0], parts[1])
 
-    for k, v in auths.items():
-        if k in search and 'auth' in v:
-            login = base64.b64decode(v['auth']).decode('utf-8')
-            parts = login.split(':', 1)
-            return (parts[0], parts[1])
+    if api in DOCKER_HOSTS:
+        for host in DOCKER_HOSTS:
+            if host in auths \
+                and 'auth' in auths[host]:
+                print('Use login for ' + host)
+                login = base64.b64decode(auths[host]['auth']).decode('utf-8')
+                parts = login.split(':', 1)
+                return (parts[0], parts[1])
 
     return None
 
@@ -353,11 +372,9 @@ src_host = src_url['host']
 src_protocol = src_url['protocol']
 src_name = src_url['name']
 src_api = src_host
-if src_api in DOCKER_HOSTS:
-    src_api = 'registry.docker.com'
 
 print('>>> Read source tags for', src_image)
-tags = request_docker_registry(src_api, src_name, 'tags/list', auth=get_auth_from_config(src_api))
+tags = request_docker_registry(src_api, src_name, 'tags/list')
 src_tags_digests = {
     x['name']: [i['digest'] for i in x['images'] if 'digest' in i] for x in tags
 }
@@ -381,11 +398,9 @@ dest_host = dest_url['host']
 dest_protocol = dest_url['protocol']
 dest_name = dest_url['name']
 dest_api = dest_host
-if dest_api in DOCKER_HOSTS:
-    dest_api = 'registry.docker.com'
 
 print('>>> Read destination tags for', dest_image)
-tags = request_docker_registry(dest_api, dest_name, 'tags/list', auth=get_auth_from_config(dest_api))
+tags = request_docker_registry(dest_api, dest_name, 'tags/list')
 dest_tags_digests = {
     x['name']: [i['digest'] for i in x['images'] if 'digest' in i] for x in tags
 }
