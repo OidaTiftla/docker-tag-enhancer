@@ -2,17 +2,24 @@
 
 import argparse
 import re
+import os
 import sys
 import subprocess
+import requests
 import json
+import base64
+import www_authenticate
 # import semver
 from collections import defaultdict
 from functools import cmp_to_key
 from time import sleep
+from pathlib import Path
+from case_insensitive_dict import CaseInsensitiveDict
+from getpass import getpass
 
 parser = argparse.ArgumentParser()
-parser.add_argument('-s', '--src', required=True, type=str, help='The repository image to read from.')
-parser.add_argument('-d', '--dest', required=True, type=str, help='The repository image to push enhanced tags to.')
+parser.add_argument('-s', '--src', type=str, help='The repository image to read from.')
+parser.add_argument('-d', '--dest', type=str, help='The repository image to push enhanced tags to.')
 parser.add_argument('-f', '--filter', type=str, help='A regex to filter the tags to process.')
 parser.add_argument('--only-new-tags', action='store_true', help='Only push new tags to destination.')
 parser.add_argument('--no-copy', action='store_true', help='Skip the copy operation.')
@@ -24,12 +31,21 @@ def parse_arguments():
 
 
 args = parse_arguments()
+if not args.login and not args.src:
+    print('--src is required')
+    exit(-1)
+if not args.login and not args.dest:
+    print('--dest is required')
+    exit(-1)
 
 
-def exec(cmd, ignoreError=False):
+docker_config_auth_file = str(Path('~/.docker/config.json').expanduser())
+
+
+def exec(cmd, ignoreError=False, input=None):
     # source: https://stackoverflow.com/a/27661481
-    pipes = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    std_out, std_err = pipes.communicate()
+    pipes = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE)
+    std_out, std_err = pipes.communicate(input=input.encode() if input is not None else None)
     exit_code = pipes.returncode
     std_out = std_out.decode(sys.getfilesystemencoding())
     std_err = std_err.decode(sys.getfilesystemencoding())
@@ -104,23 +120,62 @@ def escapeParamDoubleQuotes(param):
     return param.replace('`', '\\`').replace('"', '"\'"\'"')
 
 
+DOCKER_HOSTS = [
+    'index.docker.io',
+    'index.docker.com',
+    'registry.docker.io',
+    'registry.docker.com',
+    'registry-1.docker.io',
+    'registry-1.docker.com',
+    'docker.io',
+    'docker.com',
+]
+
+
 if args.login:
     registry = args.registry
     if not registry:
         registry = 'docker.io'
-    if registry == 'docker.io':
-        registry = 'index.' + registry
-    exec('skopeo login ' + registry)
-    exit(0)
+    if registry in DOCKER_HOSTS:
+        registry = 'docker.io'
+    print('Username: ', end='')
+    username = input()
+    password = getpass()
+    exit_code, std_out, std_err = exec('skopeo login --authfile ' + docker_config_auth_file + ' -u ' + escapeParamSingleQuotes(username) + ' --password-stdin ' + registry, ignoreError=True, input=password)
+    if exit_code == 0:
+        print('Login successful')
+        exit(0)
+    else:
+        if len(std_out) > 0:
+            print(std_out)
+        print(std_err, end='')
+        exit(-1)
+
 
 def to_full_image_url(url):
-    if url.count('/') <= 1:
+    if '.' not in url:
         url = 'docker.io/' + url
     if url.startswith('docker.io/'):
         url = 'index.' + url
     if not url.startswith('docker://'):
         url = 'docker://' + url
+    for host in DOCKER_HOSTS:
+        if url.startswith('docker://' + host + '/'):
+            url = url.replace('docker://' + host + '/', 'docker://index.docker.io/', 1)
     return url
+
+
+def parse_image_url(url):
+    url = to_full_image_url(url)
+    m = re.search(r'^(?P<protocol>[^:]*)://(?P<host>[^/]*)/(?P<name>[^:]*)(?::(?P<tag>.*))?$', url)
+    if not m:
+        return None
+    result = m.groupdict()
+    if '/' not in result['name']:
+        result['name'] = 'library/' + result['name']
+    if result['name'].startswith('_/'):
+        result['name'] = 'library/' + result['name'][2:]
+    return result
 
 
 def parse_version(text):
@@ -220,20 +275,112 @@ def max_version(versions):
 def curl_get_all_from_pages_docker_hub(url):
     result = []
     while True:
-        json = execAndParseJsonWithRetry('curl -sSX GET "' + url + '"')
-        result += json['results']
-        url = json['next']
+        o = execAndParseJsonWithRetry('curl -sSX GET "' + url + '"')
+        result += o['results']
+        url = o['next']
         if not url:
             return result
 
 
+token_cache = {}
+
+
+def retrieve_new_token(api, name, wwwAuthenticateHeader):
+    cache_key = api + '+' + name
+
+    # https://docs.docker.com/registry/spec/auth/token/
+    parsed = www_authenticate.parse(wwwAuthenticateHeader)
+    if len(parsed) != 1:
+        return None
+    authType = [x for x in parsed.keys()][0]
+    parsed = CaseInsensitiveDict[str, str](data=parsed[authType])
+    url = parsed.pop('realm')
+    params = parsed
+    auth = get_auth_from_config(api)
+    r = requests.get(url, params=params, auth=auth)
+    r.raise_for_status()
+    o = r.json()
+    token = authType + ' ' + o['token']
+    token_cache[cache_key] = token
+    return token
+
+
+def get_or_retrieve_token(api, name, wwwAuthenticateHeader=None):
+    cache_key = api + '+' + name
+
+    if cache_key in token_cache:
+        return token_cache[cache_key]
+
+    if wwwAuthenticateHeader is None:
+        return None
+
+    return retrieve_new_token(api, name, wwwAuthenticateHeader)
+
+
+def request_docker_registry(api, name, pathAndQuery, headers=None):
+    url = 'https://' + api + '/v2/' + name + '/' + pathAndQuery
+    if not headers:
+        headers = {}
+    if 'Authorization' not in headers:
+        headers['Authorization'] = get_or_retrieve_token(api, name)
+
+    i = 0
+    while True:
+        i += 1
+        r = requests.get(url, headers=headers)
+        # Unauthorized?
+        if r.status_code == 401 and i <= 1:
+            r_headers = CaseInsensitiveDict[str, str](data=r.headers)
+            if 'www-authenticate' not in r_headers:
+                break
+            headers['Authorization'] = retrieve_new_token(api, name, r_headers['www-authenticate'])
+        else:
+            break
+
+    r.raise_for_status()
+    return r.json()
+
+
+def get_auth_from_config(api):
+    if not os.path.isfile(docker_config_auth_file):
+        return None
+
+    with open(docker_config_auth_file) as reader:
+        content = reader.read()
+
+    o = json.loads(content)
+    if 'auths' not in o:
+        return None
+    auths = o['auths']
+
+    if api in auths \
+        and 'auth' in auths[api]:
+        print('Use login for ' + api)
+        login = base64.b64decode(auths[api]['auth']).decode('utf-8')
+        parts = login.split(':', 1)
+        return (parts[0], parts[1])
+
+    if api in DOCKER_HOSTS:
+        for host in DOCKER_HOSTS:
+            if host in auths \
+                and 'auth' in auths[host]:
+                print('Use login for ' + host)
+                login = base64.b64decode(auths[host]['auth']).decode('utf-8')
+                parts = login.split(':', 1)
+                return (parts[0], parts[1])
+
+    return None
+
+
 src_image = to_full_image_url(args.src)
+src_url = parse_image_url(args.src)
+src_host = src_url['host']
+src_protocol = src_url['protocol']
+src_name = src_url['name']
+src_api = src_host
+
 print('>>> Read source tags for', src_image)
-tags = curl_get_all_from_pages_docker_hub('https://hub.docker.com/v2/repositories/' + args.src + '/tags?page_size=100')
-src_tags_digests = {
-    x['name']: [i['digest'] for i in x['images'] if 'digest' in i] for x in tags
-}
-src_tags = [k for k, v in src_tags_digests.items() if len(v) > 0]
+src_tags = request_docker_registry(src_api, src_name, 'tags/list')['tags']
 # src_tags = ['14.10.2', '14.10.3', '14.10', '14.11.1-rc', '13.14.0', '13', '13-rc1-alpine', '13-rc2-alpine']
 src_tags = [t for t in src_tags if parse_version(t)]
 if args.filter:
@@ -248,12 +395,14 @@ for t in src_tags:
 src_tags_latest = dict((k, str_version(max_version(src_tags_grouped[k]))) for k in src_tags_grouped.keys())
 
 dest_image = to_full_image_url(args.dest)
+dest_url = parse_image_url(args.dest)
+dest_host = dest_url['host']
+dest_protocol = dest_url['protocol']
+dest_name = dest_url['name']
+dest_api = dest_host
+
 print('>>> Read destination tags for', dest_image)
-tags = curl_get_all_from_pages_docker_hub('https://hub.docker.com/v2/repositories/' + args.dest + '/tags?page_size=100')
-dest_tags_digests = {
-    x['name']: [i['digest'] for i in x['images'] if 'digest' in i] for x in tags
-}
-dest_tags = [k for k, v in dest_tags_digests.items() if len(v) > 0]
+dest_tags = request_docker_registry(dest_api, dest_name, 'tags/list')['tags']
 # dest_tags = ['14.10.2', '14.10.3', '14.10', '14.11.1', '13.14.0', '13']
 dest_tags = [t for t in dest_tags if parse_version(t)]
 
@@ -295,13 +444,15 @@ def mirror_image_tag(tag, dest_tag=None):
     #     exec('skopeo' + opts + ' copy ' + src_image_tag + ' ' + dest_image_tag)
     #     exit(-1)
 
-    src_digest = src_tags_digests[src_tag]
-    dest_digest = dest_tags_digests[dest_tag] if dest_tag in dest_tags_digests else None
+    src_manifests = request_docker_registry(src_api, src_name, 'manifests/' + src_tag, headers={'Accept': 'application/vnd.docker.distribution.manifest.v2+json'})
+    src_digest = src_manifests['fsLayers'] if src_manifests['schemaVersion'] == 1 else src_manifests['config']['digest']
+    dest_manifests = request_docker_registry(dest_api, dest_name, 'manifests/' + dest_tag, headers={'Accept': 'application/vnd.docker.distribution.manifest.v2+json'}) if dest_tag in dest_tags else None
+    dest_digest = dest_manifests['fsLayers'] if dest_manifests and dest_manifests['schemaVersion'] == 1 else dest_manifests['config']['digest'] if dest_manifests else None
     if src_digest == dest_digest:
         print('>>> Image tag is already up to date (digests are equal)', dest_image_tag)
     else:
         print('>>> Copy image tag from', src_image_tag, 'to', dest_image_tag)
-        execWithRetry('skopeo copy --all ' + src_image_tag + ' ' + dest_image_tag)
+        execWithRetry('skopeo copy --authfile ' + docker_config_auth_file + ' --all ' + src_image_tag + ' ' + dest_image_tag)
 
 
 def copy_with_exclude(o, exclude):

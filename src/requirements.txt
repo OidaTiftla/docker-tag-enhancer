@@ -1,1 +1,4 @@
 semver
+requests
+www-authenticate
+case-insensitive-dictionary
