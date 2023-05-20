@@ -45,7 +45,7 @@ docker_config_auth_file = str(Path('~/.docker/config.json').expanduser())
 def exec(cmd, ignoreError=False, input=None):
     # source: https://stackoverflow.com/a/27661481
     pipes = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE)
-    std_out, std_err = pipes.communicate(input=input.encode())
+    std_out, std_err = pipes.communicate(input=input.encode() if input is not None else None)
     exit_code = pipes.returncode
     std_out = std_out.decode(sys.getfilesystemencoding())
     std_err = std_err.decode(sys.getfilesystemencoding())
@@ -288,6 +288,7 @@ token_cache = {}
 def retrieve_new_token(api, name, wwwAuthenticateHeader):
     cache_key = api + '+' + name
 
+    # https://docs.docker.com/registry/spec/auth/token/
     parsed = www_authenticate.parse(wwwAuthenticateHeader)
     if len(parsed) != 1:
         return None
@@ -337,8 +338,7 @@ def request_docker_registry(api, name, pathAndQuery):
             break
 
     r.raise_for_status()
-    o = r.json()
-    return o['tags']
+    return r.json()
 
 
 def get_auth_from_config(api):
@@ -380,11 +380,7 @@ src_name = src_url['name']
 src_api = src_host
 
 print('>>> Read source tags for', src_image)
-tags = request_docker_registry(src_api, src_name, 'tags/list')
-src_tags_digests = {
-    x['name']: [i['digest'] for i in x['images'] if 'digest' in i] for x in tags
-}
-src_tags = [k for k, v in src_tags_digests.items() if len(v) > 0]
+src_tags = request_docker_registry(src_api, src_name, 'tags/list')['tags']
 # src_tags = ['14.10.2', '14.10.3', '14.10', '14.11.1-rc', '13.14.0', '13', '13-rc1-alpine', '13-rc2-alpine']
 src_tags = [t for t in src_tags if parse_version(t)]
 if args.filter:
@@ -406,11 +402,7 @@ dest_name = dest_url['name']
 dest_api = dest_host
 
 print('>>> Read destination tags for', dest_image)
-tags = request_docker_registry(dest_api, dest_name, 'tags/list')
-dest_tags_digests = {
-    x['name']: [i['digest'] for i in x['images'] if 'digest' in i] for x in tags
-}
-dest_tags = [k for k, v in dest_tags_digests.items() if len(v) > 0]
+dest_tags = request_docker_registry(dest_api, dest_name, 'tags/list')['tags']
 # dest_tags = ['14.10.2', '14.10.3', '14.10', '14.11.1', '13.14.0', '13']
 dest_tags = [t for t in dest_tags if parse_version(t)]
 
@@ -452,13 +444,13 @@ def mirror_image_tag(tag, dest_tag=None):
     #     exec('skopeo' + opts + ' copy ' + src_image_tag + ' ' + dest_image_tag)
     #     exit(-1)
 
-    src_digest = src_tags_digests[src_tag]
-    dest_digest = dest_tags_digests[dest_tag] if dest_tag in dest_tags_digests else None
+    src_digest = request_docker_registry(src_api, src_name, 'manifests/' + src_tag)['fsLayers']
+    dest_digest = request_docker_registry(dest_api, dest_name, 'manifests/' + dest_tag)['fsLayers'] if dest_tag in dest_tags else None
     if src_digest == dest_digest:
         print('>>> Image tag is already up to date (digests are equal)', dest_image_tag)
     else:
         print('>>> Copy image tag from', src_image_tag, 'to', dest_image_tag)
-        execWithRetry('skopeo copy --all ' + src_image_tag + ' ' + dest_image_tag)
+        execWithRetry('skopeo copy --authfile ' + docker_config_auth_file + ' --all ' + src_image_tag + ' ' + dest_image_tag)
 
 
 def copy_with_exclude(o, exclude):
