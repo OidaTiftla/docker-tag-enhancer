@@ -18,8 +18,8 @@ from case_insensitive_dict import CaseInsensitiveDict
 from getpass import getpass
 
 parser = argparse.ArgumentParser()
-parser.add_argument('-s', '--src', required=True, type=str, help='The repository image to read from.')
-parser.add_argument('-d', '--dest', required=True, type=str, help='The repository image to push enhanced tags to.')
+parser.add_argument('-s', '--src', type=str, help='The repository image to read from.')
+parser.add_argument('-d', '--dest', type=str, help='The repository image to push enhanced tags to.')
 parser.add_argument('-f', '--filter', type=str, help='A regex to filter the tags to process.')
 parser.add_argument('--only-new-tags', action='store_true', help='Only push new tags to destination.')
 parser.add_argument('--no-copy', action='store_true', help='Skip the copy operation.')
@@ -31,6 +31,12 @@ def parse_arguments():
 
 
 args = parse_arguments()
+if not args.login and not args.src:
+    print('--src is required')
+    exit(-1)
+if not args.login and not args.dest:
+    print('--dest is required')
+    exit(-1)
 
 
 docker_config_auth_file = str(Path('~/.docker/config.json').expanduser())
