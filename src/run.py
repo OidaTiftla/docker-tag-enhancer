@@ -317,23 +317,23 @@ def get_or_retrieve_token(api, name, wwwAuthenticateHeader=None):
     return retrieve_new_token(api, name, wwwAuthenticateHeader)
 
 
-def request_docker_registry(api, name, pathAndQuery):
+def request_docker_registry(api, name, pathAndQuery, headers=None):
     url = 'https://' + api + '/v2/' + name + '/' + pathAndQuery
-    token = get_or_retrieve_token(api, name)
+    if not headers:
+        headers = {}
+    if 'Authorization' not in headers:
+        headers['Authorization'] = get_or_retrieve_token(api, name)
 
     i = 0
     while True:
         i += 1
-        headers = {}
-        if token is not None:
-            headers['Authorization'] = token
         r = requests.get(url, headers=headers)
         # Unauthorized?
         if r.status_code == 401 and i <= 1:
-            headers = CaseInsensitiveDict[str, str](data=r.headers)
-            if 'www-authenticate' not in headers:
+            r_headers = CaseInsensitiveDict[str, str](data=r.headers)
+            if 'www-authenticate' not in r_headers:
                 break
-            token = retrieve_new_token(api, name, headers['www-authenticate'])
+            headers['Authorization'] = retrieve_new_token(api, name, r_headers['www-authenticate'])
         else:
             break
 
@@ -444,8 +444,10 @@ def mirror_image_tag(tag, dest_tag=None):
     #     exec('skopeo' + opts + ' copy ' + src_image_tag + ' ' + dest_image_tag)
     #     exit(-1)
 
-    src_digest = request_docker_registry(src_api, src_name, 'manifests/' + src_tag)['fsLayers']
-    dest_digest = request_docker_registry(dest_api, dest_name, 'manifests/' + dest_tag)['fsLayers'] if dest_tag in dest_tags else None
+    src_manifests = request_docker_registry(src_api, src_name, 'manifests/' + src_tag, headers={'Accept': 'application/vnd.docker.distribution.manifest.v2+json'})
+    src_digest = src_manifests['fsLayers'] if src_manifests['schemaVersion'] == 1 else src_manifests['config']['digest']
+    dest_manifests = request_docker_registry(dest_api, dest_name, 'manifests/' + dest_tag, headers={'Accept': 'application/vnd.docker.distribution.manifest.v2+json'}) if dest_tag in dest_tags else None
+    dest_digest = dest_manifests['fsLayers'] if dest_manifests and dest_manifests['schemaVersion'] == 1 else dest_manifests['config']['digest'] if dest_manifests else None
     if src_digest == dest_digest:
         print('>>> Image tag is already up to date (digests are equal)', dest_image_tag)
     else:
