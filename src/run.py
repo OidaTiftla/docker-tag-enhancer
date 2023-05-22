@@ -20,6 +20,8 @@ from getpass import getpass
 parser = argparse.ArgumentParser()
 parser.add_argument('-s', '--src', type=str, help='The repository image to read from.')
 parser.add_argument('-d', '--dest', type=str, help='The repository image to push enhanced tags to.')
+parser.add_argument('--prefix', type=str, help='A prefix of the tags to process.')
+parser.add_argument('--suffix', type=str, help='A suffix of the tags to process.')
 parser.add_argument('-f', '--filter', type=str, help='A regex to filter the tags to process.')
 parser.add_argument('--only-new-tags', action='store_true', help='Only push new tags to destination.')
 parser.add_argument('--no-copy', action='store_true', help='Skip the copy operation.')
@@ -179,6 +181,16 @@ def parse_image_url(url):
 
 
 def parse_version(text):
+    if args.prefix:
+        if not text.startswith(args.prefix):
+            return None
+        text = text[len(args.prefix):]
+
+    if args.suffix:
+        if not text.endswith(args.suffix):
+            return None
+        text = text[:len(text) - len(args.suffix)]
+
     m = re.search(r'^(?P<major>0|[1-9]\d*)(?:\.(?P<minor>0|[1-9]\d*)(?:\.(?P<patch>0|[1-9]\d*))?)?(-((rc(?P<rc>0|[1-9]\d*)\.)?ce\.(?P<ce>0|[1-9]\d*)|rc(?P<rc2>0|[1-9]\d*)))?(?P<rest>-.*)?$', text)
     if not m:
         return None
