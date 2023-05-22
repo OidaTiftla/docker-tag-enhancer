@@ -202,13 +202,15 @@ def parse_version(text):
 
 
 def str_version(v):
-    return v['major'] + \
+    return (args.prefix or '') + \
+        v['major'] + \
         ('.' + v['minor'] if v['minor'] else '') + \
         ('.' + v['patch'] if v['patch'] else '') + \
         ('-rc' + v['rc'] + '.ce.' + v['ce'] if 'rc' in v and v['rc'] and 'ce' in v and v['ce'] else '') + \
         ('-rc' + v['rc'] if 'rc' in v and v['rc'] and ('ce' not in v or not v['ce']) else '') + \
         ('-ce.' + v['ce'] if ('rc' not in v or not v['rc']) and 'ce' in v and v['ce'] else '') + \
-        ('rest' in v and v['rest'] or '')
+        ('rest' in v and v['rest'] or '') + \
+        (args.suffix or '')
 
 
 def compare_version(v1, v2):
@@ -390,10 +392,10 @@ if args.filter:
 src_tags = [parse_version(t) for t in src_tags]
 src_tags_grouped = defaultdict(list)
 for t in src_tags:
-    src_tags_grouped[t['major'] + ('-ce' if t['ce'] else '') + (t['rest'] or '')].append(t)
+    src_tags_grouped[(args.prefix or '') + t['major'] + ('-ce' if t['ce'] else '') + (t['rest'] or '') + (args.suffix or '')].append(t)
 for t in src_tags:
     if t['minor']:
-        src_tags_grouped[t['major'] + '.' + t['minor'] + ('-ce' if t['ce'] else '') + (t['rest'] or '')].append(t)
+        src_tags_grouped[(args.prefix or '') + t['major'] + '.' + t['minor'] + ('-ce' if t['ce'] else '') + (t['rest'] or '') + (args.suffix or '')].append(t)
 src_tags_latest = dict((k, str_version(max_version(src_tags_grouped[k]))) for k in src_tags_grouped.keys())
 
 dest_image = to_full_image_url(args.dest)
