@@ -272,16 +272,6 @@ def max_version(versions):
     return latest
 
 
-def curl_get_all_from_pages_docker_hub(url):
-    result = []
-    while True:
-        o = execAndParseJsonWithRetry('curl -sSX GET "' + url + '"')
-        result += o['results']
-        url = o['next']
-        if not url:
-            return result
-
-
 token_cache = {}
 
 
