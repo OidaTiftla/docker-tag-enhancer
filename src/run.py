@@ -24,6 +24,7 @@ parser.add_argument('--prefix', type=str, help='A prefix of the tags to process.
 parser.add_argument('--suffix', type=str, help='A suffix of the tags to process.')
 parser.add_argument('-f', '--filter', type=str, help='A regex to filter the tags to process.')
 parser.add_argument('--only-new-tags', action='store_true', help='Only push new tags to destination.')
+parser.add_argument('--update-latest', action='store_true', help='Calculate and update the \'latest\' tag.')
 parser.add_argument('--no-copy', action='store_true', help='Skip the copy operation.')
 parser.add_argument('--login', action='store_true', help='Perform a login (--registry is required).')
 parser.add_argument('-r', '--registry', type=str, help='The registry to login (defaults to docker.io).')
@@ -492,10 +493,12 @@ src_tags_sorted = [t for t in src_tags]
 src_tags_sorted.sort(key=cmp_to_key(lambda x, y: compare_version(prepare_for_sort(x), prepare_for_sort(y))))
 src_tags_latest_sorted = [t for t in src_tags_latest.keys()]
 src_tags_latest_sorted.sort(key=cmp_to_key(lambda x, y: compare_version(None if x is None else prepare_for_sort(parse_version(x)), None if y is None else prepare_for_sort(parse_version(y)))))
+src_tag_latest = max_version([prepare_for_sort(parse_version(t)) for t in src_tags_latest_sorted])
 
 print('New calculated tags are:')
 for dest_tag in src_tags_latest_sorted:
     print('- ' + dest_tag + ' \t-> ' + src_tags_latest[dest_tag])
+print('- latest \t-> ' + src_tags_latest[src_tag_latest])
 
 if not args.no_copy:
     # mirror all existing tags
@@ -506,3 +509,5 @@ if not args.no_copy:
     for dest_tag in src_tags_latest_sorted:
         if not args.only_new_tags or not dest_tag in dest_tags:
             mirror_image_tag(src_tags_latest[dest_tag], dest_tag)
+    if args.update_latest:
+        mirror_image_tag(src_tags_latest[src_tag_latest], 'latest')
