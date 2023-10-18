@@ -493,12 +493,14 @@ src_tags_sorted = [t for t in src_tags]
 src_tags_sorted.sort(key=cmp_to_key(lambda x, y: compare_version(prepare_for_sort(x), prepare_for_sort(y))))
 src_tags_latest_sorted = [t for t in src_tags_latest.keys()]
 src_tags_latest_sorted.sort(key=cmp_to_key(lambda x, y: compare_version(None if x is None else prepare_for_sort(parse_version(x)), None if y is None else prepare_for_sort(parse_version(y)))))
-src_tag_latest = str_version(max_version([parse_version(t) for t in src_tags_latest_sorted if t is not None]))
+if args.update_latest:
+    src_tag_latest = str_version(max_version([parse_version(t) for t in src_tags_latest_sorted if t is not None]))
 
 print('New calculated tags are:')
 for dest_tag in src_tags_latest_sorted:
     print('- ' + dest_tag + ' \t-> ' + src_tags_latest[dest_tag])
-print('- latest \t-> ' + src_tags_latest[src_tag_latest])
+if args.update_latest:
+    print('- latest \t-> ' + src_tags_latest[src_tag_latest])
 
 if not args.no_copy:
     # mirror all existing tags
