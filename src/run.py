@@ -28,6 +28,7 @@ parser.add_argument('--update-latest', action='store_true', help='Calculate and 
 parser.add_argument('--no-copy', action='store_true', help='Skip the copy operation.')
 parser.add_argument('--login', action='store_true', help='Perform a login (--registry is required).')
 parser.add_argument('-r', '--registry', type=str, help='The registry to login (defaults to docker.io).')
+parser.add_argument('--dry-run', action='store_true', help='Do not perform any changes, just print what would be done.')
 
 def parse_arguments():
     return parser.parse_args()
@@ -487,7 +488,8 @@ def mirror_image_tag(tag, dest_tag=None):
         print('>>> Image tag is already up to date (digests are equal)', dest_image_tag)
     else:
         print('>>> Copy image tag from', src_image_tag, 'to', dest_image_tag)
-        execWithRetry('skopeo copy --authfile ' + docker_config_auth_file + ' --all ' + src_image_tag + ' ' + dest_image_tag)
+        if not args.dry_run:
+            execWithRetry('skopeo copy --authfile ' + docker_config_auth_file + ' --all ' + src_image_tag + ' ' + dest_image_tag)
 
 
 def copy_with_exclude(o, exclude):
