@@ -489,7 +489,7 @@ def mirror_image_tag(tag, dest_tag=None):
     else:
         print('>>> Copy image tag from', src_image_tag, 'to', dest_image_tag)
         if not args.dry_run:
-            execWithRetry('skopeo copy --authfile ' + docker_config_auth_file + ' --all ' + src_image_tag + ' ' + dest_image_tag)
+            execWithRetry('skopeo copy --preserve-digests --authfile ' + docker_config_auth_file + ' --all ' + src_image_tag + ' ' + dest_image_tag)
 
 
 def copy_with_exclude(o, exclude):
