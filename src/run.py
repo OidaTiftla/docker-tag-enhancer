@@ -29,6 +29,7 @@ parser.add_argument('--no-copy', action='store_true', help='Skip the copy operat
 parser.add_argument('--login', action='store_true', help='Perform a login (--registry is required).')
 parser.add_argument('-r', '--registry', type=str, help='The registry to login (defaults to docker.io).')
 parser.add_argument('--dry-run', action='store_true', help='Do not perform any changes, just print what would be done.')
+parser.add_argument('--only-use-skopeo', action='store_true', help='Only use skopeo for the operations, do not use the Docker registry REST-API. (Might be slower.)')
 
 def parse_arguments():
     return parser.parse_args()
@@ -292,6 +293,9 @@ token_cache = {}
 
 
 def retrieve_new_token(api, name, wwwAuthenticateHeader):
+    if args.only_use_skopeo:
+        raise Exception('Cannot retrieve new token, --only-use-skopeo is set. This might be a situation that has not been implemented yet.')
+
     cache_key = api + '+' + name
 
     # https://docs.docker.com/registry/spec/auth/token/
@@ -324,6 +328,9 @@ def get_or_retrieve_token(api, name, wwwAuthenticateHeader=None):
 
 
 def request_docker_registry(api, name, pathAndQuery, headers=None):
+    if args.only_use_skopeo:
+        raise Exception('Cannot retrieve new token, --only-use-skopeo is set. This might be a situation that has not been implemented yet.')
+
     url = 'https://' + api + '/v2/' + name + '/' + pathAndQuery
     if not headers:
         headers = {}
@@ -386,7 +393,10 @@ src_name = src_url['name']
 src_api = src_host
 
 print('>>> Read source tags for', src_image)
-src_tags = execAndParseJsonWithRetryRateLimit('skopeo list-tags --authfile ' + docker_config_auth_file + ' ' + src_image)['Tags']
+if args.only_use_skopeo:
+    src_tags = execAndParseJsonWithRetryRateLimit('skopeo list-tags --authfile ' + docker_config_auth_file + ' ' + src_image)['Tags']
+else:
+    src_tags = request_docker_registry(src_api, src_name, 'tags/list')['tags']
 # src_tags = ['14.10.2', '14.10.3', '14.10', '14.11.1-rc', '13.14.0', '13', '13-rc1-alpine', '13-rc2-alpine']
 src_tags = [t for t in src_tags if parse_version(t)]
 if args.filter:
@@ -408,7 +418,10 @@ dest_name = dest_url['name']
 dest_api = dest_host
 
 print('>>> Read destination tags for', dest_image)
-dest_tags = execAndParseJsonWithRetryRateLimit('skopeo list-tags --authfile ' + docker_config_auth_file + ' ' + dest_image)['Tags']
+if args.only_use_skopeo:
+    dest_tags = execAndParseJsonWithRetryRateLimit('skopeo list-tags --authfile ' + docker_config_auth_file + ' ' + dest_image)['Tags']
+else:
+    dest_tags = request_docker_registry(dest_api, dest_name, 'tags/list')['tags']
 # dest_tags = ['14.10.2', '14.10.3', '14.10', '14.11.1', '13.14.0', '13']
 dest_tags = [t for t in dest_tags if parse_version(t)]
 
@@ -450,39 +463,49 @@ def mirror_image_tag(tag, dest_tag=None):
     #     exec('skopeo' + opts + ' copy ' + src_image_tag + ' ' + dest_image_tag)
     #     exit(-1)
 
-    try:
-        src_manifests = request_docker_registry(src_api, src_name, 'manifests/' + src_tag, headers={'Accept': 'application/vnd.docker.distribution.manifest.v2+json'})
-        src_digest = None
-        if src_manifests:
-            if src_manifests.get('schemaVersion') == 1:
-                src_digest = src_manifests.get('fsLayers')
-            elif src_manifests.get('config') and src_manifests['config'].get('digest'):
-                src_digest = src_manifests['config']['digest']
-            elif src_manifests.get('manifests'):
-                src_digest = [x.get('digest') for x in src_manifests['manifests']]
-    except requests.exceptions.HTTPError as err:
-        if err.response.status_code == 404:
-            src_manifests = request_docker_registry(src_api, src_name, 'manifests/' + src_tag, headers={'Accept': 'application/vnd.oci.image.index.v1+json'})
-            src_digest = [x['digest'] for x in src_manifests['manifests']]
-        else:
-            raise err
+    if args.only_use_skopeo:
+        src_digest = execAndParseJsonWithRetryRateLimit('skopeo inspect --no-tags --authfile ' + docker_config_auth_file + ' ' + src_image_tag)['Digest']
+        try:
+            dest_digest = execAndParseJsonWithRetryRateLimit('skopeo inspect --no-tags --authfile ' + docker_config_auth_file + ' ' + dest_image_tag)['Digest']
+        except Exception as err:
+            if 'manifest unknown' in str(err):
+                dest_digest = None
+            else:
+                raise err
+    else:
+        try:
+            src_manifests = request_docker_registry(src_api, src_name, 'manifests/' + src_tag, headers={'Accept': 'application/vnd.docker.distribution.manifest.v2+json'})
+            src_digest = None
+            if src_manifests:
+                if src_manifests.get('schemaVersion') == 1:
+                    src_digest = src_manifests.get('fsLayers')
+                elif src_manifests.get('config') and src_manifests['config'].get('digest'):
+                    src_digest = src_manifests['config']['digest']
+                elif src_manifests.get('manifests'):
+                    src_digest = [x.get('digest') for x in src_manifests['manifests']]
+        except requests.exceptions.HTTPError as err:
+            if err.response.status_code == 404:
+                src_manifests = request_docker_registry(src_api, src_name, 'manifests/' + src_tag, headers={'Accept': 'application/vnd.oci.image.index.v1+json'})
+                src_digest = [x['digest'] for x in src_manifests['manifests']]
+            else:
+                raise err
 
-    try:
-        dest_manifests = request_docker_registry(dest_api, dest_name, 'manifests/' + dest_tag, headers={'Accept': 'application/vnd.docker.distribution.manifest.v2+json'}) if dest_tag in dest_tags else None
-        dest_digest = None
-        if dest_manifests:
-            if dest_manifests.get('schemaVersion') == 1:
-                dest_digest = dest_manifests.get('fsLayers')
-            elif dest_manifests.get('config') and dest_manifests['config'].get('digest'):
-                dest_digest = dest_manifests['config']['digest']
-            elif dest_manifests.get('manifests'):
-                dest_digest = [x.get('digest') for x in dest_manifests['manifests']]
-    except requests.exceptions.HTTPError as err:
-        if err.response.status_code == 404:
-            dest_manifests = request_docker_registry(dest_api, dest_name, 'manifests/' + dest_tag, headers={'Accept': 'application/vnd.oci.image.index.v1+json'})
-            dest_digest = [x['digest'] for x in dest_manifests['manifests']]
-        else:
-            raise err
+        try:
+            dest_manifests = request_docker_registry(dest_api, dest_name, 'manifests/' + dest_tag, headers={'Accept': 'application/vnd.docker.distribution.manifest.v2+json'}) if dest_tag in dest_tags else None
+            dest_digest = None
+            if dest_manifests:
+                if dest_manifests.get('schemaVersion') == 1:
+                    dest_digest = dest_manifests.get('fsLayers')
+                elif dest_manifests.get('config') and dest_manifests['config'].get('digest'):
+                    dest_digest = dest_manifests['config']['digest']
+                elif dest_manifests.get('manifests'):
+                    dest_digest = [x.get('digest') for x in dest_manifests['manifests']]
+        except requests.exceptions.HTTPError as err:
+            if err.response.status_code == 404:
+                dest_manifests = request_docker_registry(dest_api, dest_name, 'manifests/' + dest_tag, headers={'Accept': 'application/vnd.oci.image.index.v1+json'})
+                dest_digest = [x['digest'] for x in dest_manifests['manifests']]
+            else:
+                raise err
 
     if src_digest == dest_digest:
         print('>>> Image tag is already up to date (digests are equal)', dest_image_tag)
