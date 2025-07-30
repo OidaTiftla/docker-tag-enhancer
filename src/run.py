@@ -386,7 +386,7 @@ src_name = src_url['name']
 src_api = src_host
 
 print('>>> Read source tags for', src_image)
-src_tags = request_docker_registry(src_api, src_name, 'tags/list')['tags']
+src_tags = execAndParseJsonWithRetryRateLimit('skopeo list-tags --authfile ' + docker_config_auth_file + ' ' + src_image)['Tags']
 # src_tags = ['14.10.2', '14.10.3', '14.10', '14.11.1-rc', '13.14.0', '13', '13-rc1-alpine', '13-rc2-alpine']
 src_tags = [t for t in src_tags if parse_version(t)]
 if args.filter:
@@ -408,7 +408,7 @@ dest_name = dest_url['name']
 dest_api = dest_host
 
 print('>>> Read destination tags for', dest_image)
-dest_tags = request_docker_registry(dest_api, dest_name, 'tags/list')['tags']
+dest_tags = execAndParseJsonWithRetryRateLimit('skopeo list-tags --authfile ' + docker_config_auth_file + ' ' + dest_image)['Tags']
 # dest_tags = ['14.10.2', '14.10.3', '14.10', '14.11.1', '13.14.0', '13']
 dest_tags = [t for t in dest_tags if parse_version(t)]
 
