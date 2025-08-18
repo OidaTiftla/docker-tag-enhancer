@@ -18,7 +18,7 @@ docker run --rm -it -v ~/.docker/config.json:/root/.docker/config.json oidatiftl
 
 ### GitHub Container Registry (GHCR) read existing tags
 
-For some reason ([Quelle](https://github.com/orgs/community/discussions/26279#discussioncomment-3251172), [Quelle](https://github.com/orgs/community/discussions/26279#discussioncomment-10658026)) the `GITHUB_TOKEN` needs to be encoded with `base64`:
+For some reason ([source](https://github.com/orgs/community/discussions/26279#discussioncomment-3251172), [source](https://github.com/orgs/community/discussions/26279#discussioncomment-10658026)) the `GITHUB_TOKEN` needs to be encoded with `base64`:
 
 ```yaml
 ...
