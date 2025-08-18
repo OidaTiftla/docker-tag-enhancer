@@ -27,6 +27,9 @@ parser.add_argument('--only-new-tags', action='store_true', help='Only push new 
 parser.add_argument('--update-latest', action='store_true', help='Calculate and update the \'latest\' tag.')
 parser.add_argument('--no-copy', action='store_true', help='Skip the copy operation.')
 parser.add_argument('--login', action='store_true', help='Perform a login (--registry is required).')
+parser.add_argument('--registry-token', type=str, help='Bearer token for accessing the source and destination registry. If not set, the script will try to retrieve it from the Docker config file.')
+parser.add_argument('--src-registry-token', type=str, help='Bearer token for accessing the source registry. If not set, the script will use the --registry-token or try to retrieve it from the Docker config file.')
+parser.add_argument('--dest-registry-token', type=str, help='Bearer token for accessing the destination registry. If not set, the script will use the --registry-token or try to retrieve it from the Docker config file.')
 parser.add_argument('-r', '--registry', type=str, help='The registry to login (defaults to docker.io).')
 parser.add_argument('--dry-run', action='store_true', help='Do not perform any changes, just print what would be done.')
 parser.add_argument('--only-use-skopeo', action='store_true', help='Only use skopeo for the operations, do not use the Docker registry REST-API. (Might be slower.)')
@@ -42,6 +45,10 @@ if not args.login and not args.src:
 if not args.login and not args.dest:
     print('--dest is required')
     exit(-1)
+if not args.src_registry_token and args.registry_token:
+    args.src_registry_token = args.registry_token
+if not args.dest_registry_token and args.registry_token:
+    args.dest_registry_token = args.registry_token
 
 
 docker_config_auth_file = str(Path('~/.docker/config.json').expanduser())
@@ -290,6 +297,18 @@ def max_version(versions):
 
 
 token_cache = {}
+src_skopeo_auth_args = '--authfile ' + docker_config_auth_file
+dest_skopeo_auth_args = '--authfile ' + docker_config_auth_file
+src_dest_skopeo_auth_args = '--authfile ' + docker_config_auth_file
+
+
+def set_registry_token(api, name, token):
+    cache_key = api + '+' + name
+    if not token:
+        if cache_key in token_cache:
+            del token_cache[cache_key]
+    else:
+        token_cache[cache_key] = 'Bearer ' + token
 
 
 def retrieve_new_token(api, name, wwwAuthenticateHeader):
@@ -395,9 +414,15 @@ src_protocol = src_url['protocol']
 src_name = src_url['name']
 src_api = src_host
 
+if args.src_registry_token:
+    print('>>> Use registry token for source image.')
+    set_registry_token(src_api, src_name, args.src_registry_token)
+    src_skopeo_auth_args += ' --registry-token ' + args.src_registry_token
+    src_dest_skopeo_auth_args += ' --src-registry-token ' + args.src_registry_token
+
 print('>>> Read source tags for', src_image)
 if args.only_use_skopeo:
-    src_tags = execAndParseJsonWithRetryRateLimit('skopeo list-tags --authfile ' + docker_config_auth_file + ' ' + src_image)['Tags']
+    src_tags = execAndParseJsonWithRetryRateLimit('skopeo list-tags ' + src_skopeo_auth_args + ' ' + src_image)['Tags']
 else:
     src_tags = request_docker_registry(src_api, src_name, 'tags/list')['tags']
 # src_tags = ['14.10.2', '14.10.3', '14.10', '14.11.1-rc', '13.14.0', '13', '13-rc1-alpine', '13-rc2-alpine']
@@ -420,9 +445,15 @@ dest_protocol = dest_url['protocol']
 dest_name = dest_url['name']
 dest_api = dest_host
 
+if args.dest_registry_token:
+    print('>>> Use registry token for destination image.')
+    set_registry_token(dest_api, dest_name, args.dest_registry_token)
+    dest_skopeo_auth_args += ' --registry-token ' + args.dest_registry_token
+    src_dest_skopeo_auth_args += ' --dest-registry-token ' + args.dest_registry_token
+
 print('>>> Read destination tags for', dest_image)
 if args.only_use_skopeo:
-    dest_tags = execAndParseJsonWithRetryRateLimit('skopeo list-tags --authfile ' + docker_config_auth_file + ' ' + dest_image)['Tags']
+    dest_tags = execAndParseJsonWithRetryRateLimit('skopeo list-tags ' + dest_skopeo_auth_args + ' ' + dest_image)['Tags']
 else:
     dest_tags = request_docker_registry(dest_api, dest_name, 'tags/list')['tags']
 # dest_tags = ['14.10.2', '14.10.3', '14.10', '14.11.1', '13.14.0', '13']
@@ -467,9 +498,9 @@ def mirror_image_tag(tag, dest_tag=None):
     #     exit(-1)
 
     if args.only_use_skopeo:
-        src_digest = execAndParseJsonWithRetryRateLimit('skopeo inspect --no-tags --authfile ' + docker_config_auth_file + ' ' + src_image_tag)['Digest']
+        src_digest = execAndParseJsonWithRetryRateLimit('skopeo inspect --no-tags ' + src_skopeo_auth_args + ' ' + src_image_tag)['Digest']
         try:
-            dest_digest = execAndParseJsonWithRetryRateLimit('skopeo inspect --no-tags --authfile ' + docker_config_auth_file + ' ' + dest_image_tag)['Digest']
+            dest_digest = execAndParseJsonWithRetryRateLimit('skopeo inspect --no-tags ' + dest_skopeo_auth_args + ' ' + dest_image_tag)['Digest']
         except Exception as err:
             if 'manifest unknown' in str(err):
                 dest_digest = None
@@ -515,7 +546,7 @@ def mirror_image_tag(tag, dest_tag=None):
     else:
         print('>>> Copy image tag from', src_image_tag, 'to', dest_image_tag)
         if not args.dry_run:
-            execWithRetry('skopeo copy --preserve-digests --authfile ' + docker_config_auth_file + ' --all ' + src_image_tag + ' ' + dest_image_tag)
+            execWithRetry('skopeo copy --preserve-digests ' + src_dest_skopeo_auth_args + ' --all ' + src_image_tag + ' ' + dest_image_tag)
 
 
 def copy_with_exclude(o, exclude):

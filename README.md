@@ -16,6 +16,35 @@ docker run --rm -it -v ~/.docker/config.json:/root/.docker/config.json oidatiftl
 docker run --rm -it -v ~/.docker/config.json:/root/.docker/config.json oidatiftla/docker-tag-enhancer -s registry.example.com/name1 -d registry.example.com/name2 -f '^((?!-rc|^8\.|^9\.|^10\.|^11\.|^12\.).)*$'
 ```
 
+### GitHub Container Registry (GHCR) read existing tags
+
+For some reason ([Quelle](https://github.com/orgs/community/discussions/26279#discussioncomment-3251172), [Quelle](https://github.com/orgs/community/discussions/26279#discussioncomment-10658026)) the `GITHUB_TOKEN` needs to be encoded with `base64`:
+
+```yaml
+...
+
+permissions:
+  contents: read
+  packages: write
+
+...
+
+jobs:
+  job:
+    runs-on: ubuntu-latest
+    steps:
+
+...
+
+      - name: Retrieve tags
+        run: |
+          ENCODED=$(echo -n "${{ secrets.GITHUB_TOKEN }}" | base64)
+
+          skopeo list-tags \
+            --registry-token="${ENCODED}" \
+            docker://${DOCKER_REGISTRY_IMAGE}
+```
+
 ## Build from source
 
 ```bash
