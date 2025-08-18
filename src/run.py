@@ -310,7 +310,10 @@ def retrieve_new_token(api, name, wwwAuthenticateHeader):
     r = requests.get(url, params=params, auth=auth)
     r.raise_for_status()
     o = r.json()
-    token = authType + ' ' + o['token']
+    t = o['token'] if 'token' in o else None
+    if not t:
+        raise Exception('No token found in response: ' + str(o))
+    token = authType + ' ' + t
     token_cache[cache_key] = token
     return token
 
