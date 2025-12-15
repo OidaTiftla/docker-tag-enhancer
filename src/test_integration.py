@@ -522,7 +522,7 @@ class TestCompleteWorkflow(unittest.TestCase):
         # Test zero versions
         v = run.parse_version('0.0.0')
         self.assertIsNotNone(v)
-        self.assertEqual(v['major'], '0')
+        self.assertEqual(v['parts'], ['0', '0', '0'])
 
         # Test single digit versions
         v = run.parse_version('1')
@@ -537,9 +537,7 @@ class TestCompleteWorkflow(unittest.TestCase):
         # Test with all features
         v = run.parse_version('1.2.3-rc4.ce.5-alpine')
         self.assertIsNotNone(v)
-        self.assertEqual(v['major'], '1')
-        self.assertEqual(v['minor'], '2')
-        self.assertEqual(v['patch'], '3')
+        self.assertEqual(v['parts'], ['1', '2', '3'])
         self.assertEqual(v['rc'], '4')
         self.assertEqual(v['ce'], '5')
         self.assertEqual(v['rest'], '-alpine')

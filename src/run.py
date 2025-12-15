@@ -289,28 +289,41 @@ def parse_version(text):
             return None
         text = text[:len(text) - len(args.suffix)]
 
-    m = re.search(r'^(?P<major>0|[1-9]\d*)(?:\.(?P<minor>0|[1-9]\d*)(?:\.(?P<patch>0|[1-9]\d*)(?:\.(?P<build>0|[1-9]\d*)(?:\.(?P<build2>0|[1-9]\d*))?)?)?)?(-((rc(?P<rc>0|[1-9]\d*)\.)?ce\.(?P<ce>0|[1-9]\d*)|rc(?P<rc2>0|[1-9]\d*)))?(?P<rest>-.*)?$', text)
+    # Parse version parts (1 or more numeric parts separated by dots)
+    # Followed by optional -rc/-ce/-rest suffixes
+    m = re.search(r'^(?P<parts>(?:0|[1-9]\d*)(?:\.(?:0|[1-9]\d*))*)(-((rc(?P<rc>0|[1-9]\d*)\.)?ce\.(?P<ce>0|[1-9]\d*)|rc(?P<rc2>0|[1-9]\d*)))?(?P<rest>-.*)?$', text)
     if not m:
         return None
     result = m.groupdict()
+
+    # Convert version parts string to list of strings
+    result['parts'] = result['parts'].split('.')
+
+    # Normalize rc field
     if result['rc2']:
         result['rc'] = result['rc2']
     del result['rc2']
+
     return result
 
 
 def str_version(v):
-    return (args.prefix or '') + \
-        v['major'] + \
-        ('.' + v['minor'] if v['minor'] else '') + \
-        ('.' + v['patch'] if v['patch'] else '') + \
-        ('.' + v['build'] if 'build' in v and v['build'] else '') + \
-        ('.' + v['build2'] if 'build2' in v and v['build2'] else '') + \
-        ('-rc' + v['rc'] + '.ce.' + v['ce'] if 'rc' in v and v['rc'] and 'ce' in v and v['ce'] else '') + \
-        ('-rc' + v['rc'] if 'rc' in v and v['rc'] and ('ce' not in v or not v['ce']) else '') + \
-        ('-ce.' + v['ce'] if ('rc' not in v or not v['rc']) and 'ce' in v and v['ce'] else '') + \
-        ('rest' in v and v['rest'] or '') + \
-        (args.suffix or '')
+    # Build version string from parts list
+    version_str = '.'.join(v['parts'])
+
+    # Add suffix parts
+    suffix_parts = []
+    if 'rc' in v and v['rc'] and 'ce' in v and v['ce']:
+        suffix_parts.append('-rc' + v['rc'] + '.ce.' + v['ce'])
+    elif 'rc' in v and v['rc']:
+        suffix_parts.append('-rc' + v['rc'])
+    elif 'ce' in v and v['ce']:
+        suffix_parts.append('-ce.' + v['ce'])
+
+    if 'rest' in v and v['rest']:
+        suffix_parts.append(v['rest'])
+
+    return (args.prefix or '') + version_str + ''.join(suffix_parts) + (args.suffix or '')
 
 
 def compare_version(v1, v2):
@@ -321,6 +334,7 @@ def compare_version(v1, v2):
     if not v2:
         return 1
 
+    # Check if rest/ce suffixes are incompatible
     if ('rest' in v1 and 'rest' in v2 and not v1['rest'] == v2['rest']) \
         or ('ce' in v1 and not 'ce' in v2 and v1['ce']) \
         or (not 'ce' in v1 and 'ce' in v2 and v2['ce']) \
@@ -328,51 +342,31 @@ def compare_version(v1, v2):
         or ('ce' in v1 and 'ce' in v2 and not v1['ce'] and v2['ce']):
         raise Exception('Cannot compare versions ' + str_version(v1) + ' and ' + str_version(v2))
 
-    if int(v1['major']) < int(v2['major']):
-        return -1
-    elif int(v1['major']) > int(v2['major']):
-        return 1
+    # Compare version parts iteratively
+    parts1 = v1['parts']
+    parts2 = v2['parts']
+    max_len = max(len(parts1), len(parts2))
 
-    if v1['minor'] and v2['minor']:
-        if int(v1['minor']) < int(v2['minor']):
+    for i in range(max_len):
+        has_p1 = i < len(parts1)
+        has_p2 = i < len(parts2)
+
+        if has_p1 and has_p2:
+            # Both have this part - compare numerically
+            p1_int = int(parts1[i])
+            p2_int = int(parts2[i])
+            if p1_int < p2_int:
+                return -1
+            elif p1_int > p2_int:
+                return 1
+        elif has_p1 and not has_p2:
+            # v1 has more parts - less specific version is greater
             return -1
-        elif int(v1['minor']) > int(v2['minor']):
+        elif not has_p1 and has_p2:
+            # v2 has more parts - less specific version is greater
             return 1
-    elif v1['minor'] and not v2['minor']:
-        return -1
-    elif not v1['minor'] and v2['minor']:
-        return 1
 
-    if v1['patch'] and v2['patch']:
-        if int(v1['patch']) < int(v2['patch']):
-            return -1
-        elif int(v1['patch']) > int(v2['patch']):
-            return 1
-    elif v1['patch'] and not v2['patch']:
-        return -1
-    elif not v1['patch'] and v2['patch']:
-        return 1
-
-    if 'build' in v1 and 'build' in v2 and v1['build'] and v2['build']:
-        if int(v1['build']) < int(v2['build']):
-            return -1
-        elif int(v1['build']) > int(v2['build']):
-            return 1
-    elif 'build' in v1 and v1['build'] and ('build' not in v2 or not v2['build']):
-        return -1
-    elif ('build' not in v1 or not v1['build']) and 'build' in v2 and v2['build']:
-        return 1
-
-    if 'build2' in v1 and 'build2' in v2 and v1['build2'] and v2['build2']:
-        if int(v1['build2']) < int(v2['build2']):
-            return -1
-        elif int(v1['build2']) > int(v2['build2']):
-            return 1
-    elif 'build2' in v1 and v1['build2'] and ('build2' not in v2 or not v2['build2']):
-        return -1
-    elif ('build2' not in v1 or not v1['build2']) and 'build2' in v2 and v2['build2']:
-        return 1
-
+    # Compare rc versions
     if v1['rc'] and v2['rc']:
         if int(v1['rc']) < int(v2['rc']):
             return -1
@@ -383,6 +377,7 @@ def compare_version(v1, v2):
     elif not v1['rc'] and v2['rc']:
         return 1
 
+    # Compare ce versions
     if 'ce' in v1 and 'ce' in v2 and v1['ce'] and v2['ce']:
         if int(v1['ce']) < int(v2['ce']):
             return -1
@@ -425,29 +420,13 @@ def group_versions(versions, prefix='', suffix=''):
         ce_suffix = '-ce' if v.get('ce') else ''
         rest_suffix = v.get('rest') or ''
 
-        # Group by major
-        major_key = prefix + v['major'] + ce_suffix + rest_suffix + suffix
-        grouped[major_key].append(v)
-
-        # Group by major.minor (if minor exists)
-        if v['minor']:
-            minor_key = prefix + v['major'] + '.' + v['minor'] + ce_suffix + rest_suffix + suffix
-            grouped[minor_key].append(v)
-
-            # Group by major.minor.patch (if patch exists)
-            if v['patch']:
-                patch_key = prefix + v['major'] + '.' + v['minor'] + '.' + v['patch'] + ce_suffix + rest_suffix + suffix
-                grouped[patch_key].append(v)
-
-                # Group by major.minor.patch.build (if build exists)
-                if v.get('build'):
-                    build_key = prefix + v['major'] + '.' + v['minor'] + '.' + v['patch'] + '.' + v['build'] + ce_suffix + rest_suffix + suffix
-                    grouped[build_key].append(v)
-
-                    # Group by major.minor.patch.build.build2 (if build2 exists)
-                    if v.get('build2'):
-                        build2_key = prefix + v['major'] + '.' + v['minor'] + '.' + v['patch'] + '.' + v['build'] + '.' + v['build2'] + ce_suffix + rest_suffix + suffix
-                        grouped[build2_key].append(v)
+        # Group at each hierarchical level
+        parts = v['parts']
+        for i in range(len(parts)):
+            # Build key from parts[0] to parts[i]
+            version_key = '.'.join(parts[:i+1])
+            full_key = prefix + version_key + ce_suffix + rest_suffix + suffix
+            grouped[full_key].append(v)
 
     return dict(grouped)
 
