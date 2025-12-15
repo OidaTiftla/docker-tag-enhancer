@@ -38,20 +38,133 @@ def parse_arguments():
     return parser.parse_args()
 
 
-args = parse_arguments()
-if not args.login and not args.src:
-    print('--src is required')
-    exit(-1)
-if not args.login and not args.dest:
-    print('--dest is required')
-    exit(-1)
-if not args.src_registry_token and args.registry_token:
-    args.src_registry_token = args.registry_token
-if not args.dest_registry_token and args.registry_token:
-    args.dest_registry_token = args.registry_token
-
+# Initialize args as None - will be set by parse_arguments() or by tests
+args = None
 
 docker_config_auth_file = str(Path('~/.docker/config.json').expanduser())
+
+
+def main():
+    """Main execution function"""
+    global args
+    args = parse_arguments()
+
+    if not args.login and not args.src:
+        print('--src is required')
+        exit(-1)
+    if not args.login and not args.dest:
+        print('--dest is required')
+        exit(-1)
+    if not args.src_registry_token and args.registry_token:
+        args.src_registry_token = args.registry_token
+    if not args.dest_registry_token and args.registry_token:
+        args.dest_registry_token = args.registry_token
+
+    # Run the rest of the main logic
+    run_main_logic()
+
+
+def run_main_logic():
+    """Main logic after argument parsing"""
+    global src_skopeo_auth_args, dest_skopeo_auth_args, src_dest_skopeo_auth_args
+    global src_image, dest_image, src_api, dest_api, src_name, dest_name, dest_tags
+
+    if args.login:
+        registry = args.registry
+        if not registry:
+            registry = 'docker.io'
+        if registry in DOCKER_HOSTS:
+            registry = 'docker.io'
+        print('Username: ', end='')
+        username = input()
+        password = getpass()
+        exit_code, std_out, std_err = exec('skopeo login --authfile ' + docker_config_auth_file + ' -u ' + escapeParamSingleQuotes(username) + ' --password-stdin ' + registry, ignoreError=True, input=password)
+        if exit_code == 0:
+            print('Login successful')
+            exit(0)
+        else:
+            if len(std_out) > 0:
+                print(std_out)
+            print(std_err, end='')
+            exit(-1)
+
+    # Continue with the main tag processing logic
+    src_image = to_full_image_url(args.src)
+    src_url = parse_image_url(args.src)
+    src_host = src_url['host']
+    src_protocol = src_url['protocol']
+    src_name = src_url['name']
+    src_api = src_host
+
+    if args.src_registry_token:
+        print('>>> Use registry token for source image.')
+        set_registry_token(src_api, src_name, args.src_registry_token)
+        src_skopeo_auth_args += ' --registry-token ' + args.src_registry_token
+        src_dest_skopeo_auth_args += ' --src-registry-token ' + args.src_registry_token
+
+    print('>>> Read source tags for', src_image)
+    if args.only_use_skopeo:
+        src_tags = execAndParseJsonWithRetryRateLimit('skopeo list-tags ' + src_skopeo_auth_args + ' ' + src_image)['Tags']
+    else:
+        src_tags = request_docker_registry(src_api, src_name, 'tags/list')['tags']
+    # src_tags = ['14.10.2', '14.10.3', '14.10', '14.11.1-rc', '13.14.0', '13', '13-rc1-alpine', '13-rc2-alpine']
+    src_tags = [t for t in src_tags if parse_version(t)]
+    if args.filter:
+        src_tags = [t for t in src_tags if re.search(args.filter, t)]
+    src_tags = [parse_version(t) for t in src_tags]
+    src_tags_grouped = defaultdict(list)
+    for t in src_tags:
+        src_tags_grouped[(args.prefix or '') + t['major'] + ('-ce' if t['ce'] else '') + (t['rest'] or '') + (args.suffix or '')].append(t)
+    for t in src_tags:
+        if t['minor']:
+            src_tags_grouped[(args.prefix or '') + t['major'] + '.' + t['minor'] + ('-ce' if t['ce'] else '') + (t['rest'] or '') + (args.suffix or '')].append(t)
+    src_tags_latest = dict((k, str_version(max_version(src_tags_grouped[k]))) for k in src_tags_grouped.keys())
+
+    dest_image = to_full_image_url(args.dest)
+    dest_url = parse_image_url(args.dest)
+    dest_host = dest_url['host']
+    dest_protocol = dest_url['protocol']
+    dest_name = dest_url['name']
+    dest_api = dest_host
+
+    if args.dest_registry_token:
+        print('>>> Use registry token for destination image.')
+        set_registry_token(dest_api, dest_name, args.dest_registry_token)
+        dest_skopeo_auth_args += ' --registry-token ' + args.dest_registry_token
+        src_dest_skopeo_auth_args += ' --dest-registry-token ' + args.dest_registry_token
+
+    print('>>> Read destination tags for', dest_image)
+    if args.only_use_skopeo:
+        dest_tags = execAndParseJsonWithRetryRateLimit('skopeo list-tags ' + dest_skopeo_auth_args + ' ' + dest_image)['Tags']
+    else:
+        dest_tags = request_docker_registry(dest_api, dest_name, 'tags/list')['tags']
+    # dest_tags = ['14.10.2', '14.10.3', '14.10', '14.11.1', '13.14.0', '13']
+    dest_tags = [t for t in dest_tags if parse_version(t)]
+
+    src_tags_sorted = [t for t in src_tags]
+    src_tags_sorted.sort(key=cmp_to_key(lambda x, y: compare_version(prepare_for_sort(x), prepare_for_sort(y))))
+    src_tags_latest_sorted = [t for t in src_tags_latest.keys()]
+    src_tags_latest_sorted.sort(key=cmp_to_key(lambda x, y: compare_version(None if x is None else prepare_for_sort(parse_version(x)), None if y is None else prepare_for_sort(parse_version(y)))))
+    if args.update_latest:
+        src_tag_latest = str_version(max_version([parse_version(t) for t in src_tags_latest_sorted if t is not None]))
+
+    print('New calculated tags are:')
+    for dest_tag in src_tags_latest_sorted:
+        print('- ' + dest_tag + ' \t-> ' + src_tags_latest[dest_tag])
+    if args.update_latest:
+        print('- latest \t-> ' + src_tags_latest[src_tag_latest])
+
+    if not args.no_copy:
+        # mirror all existing tags
+        for src_tag in [str_version(t) for t in src_tags_sorted]:
+            if not args.only_new_tags or not src_tag in dest_tags:
+                mirror_image_tag(src_tag)
+
+        for dest_tag in src_tags_latest_sorted:
+            if not args.only_new_tags or not dest_tag in dest_tags:
+                mirror_image_tag(src_tags_latest[dest_tag], dest_tag)
+        if args.update_latest:
+            mirror_image_tag(src_tags_latest[src_tag_latest], 'latest')
 
 
 def exec(cmd, ignoreError=False, input=None):
@@ -142,26 +255,6 @@ DOCKER_HOSTS = [
     'docker.io',
     'docker.com',
 ]
-
-
-if args.login:
-    registry = args.registry
-    if not registry:
-        registry = 'docker.io'
-    if registry in DOCKER_HOSTS:
-        registry = 'docker.io'
-    print('Username: ', end='')
-    username = input()
-    password = getpass()
-    exit_code, std_out, std_err = exec('skopeo login --authfile ' + docker_config_auth_file + ' -u ' + escapeParamSingleQuotes(username) + ' --password-stdin ' + registry, ignoreError=True, input=password)
-    if exit_code == 0:
-        print('Login successful')
-        exit(0)
-    else:
-        if len(std_out) > 0:
-            print(std_out)
-        print(std_err, end='')
-        exit(-1)
 
 
 def to_full_image_url(url):
@@ -301,6 +394,15 @@ src_skopeo_auth_args = '--authfile ' + docker_config_auth_file
 dest_skopeo_auth_args = '--authfile ' + docker_config_auth_file
 src_dest_skopeo_auth_args = '--authfile ' + docker_config_auth_file
 
+# Global variables set by run_main_logic() and used by mirror_image_tag()
+src_image = None
+dest_image = None
+src_api = None
+dest_api = None
+src_name = None
+dest_name = None
+dest_tags = None
+
 
 def set_registry_token(api, name, token):
     cache_key = api + '+' + name
@@ -407,59 +509,6 @@ def get_auth_from_config(api):
     return None
 
 
-src_image = to_full_image_url(args.src)
-src_url = parse_image_url(args.src)
-src_host = src_url['host']
-src_protocol = src_url['protocol']
-src_name = src_url['name']
-src_api = src_host
-
-if args.src_registry_token:
-    print('>>> Use registry token for source image.')
-    set_registry_token(src_api, src_name, args.src_registry_token)
-    src_skopeo_auth_args += ' --registry-token ' + args.src_registry_token
-    src_dest_skopeo_auth_args += ' --src-registry-token ' + args.src_registry_token
-
-print('>>> Read source tags for', src_image)
-if args.only_use_skopeo:
-    src_tags = execAndParseJsonWithRetryRateLimit('skopeo list-tags ' + src_skopeo_auth_args + ' ' + src_image)['Tags']
-else:
-    src_tags = request_docker_registry(src_api, src_name, 'tags/list')['tags']
-# src_tags = ['14.10.2', '14.10.3', '14.10', '14.11.1-rc', '13.14.0', '13', '13-rc1-alpine', '13-rc2-alpine']
-src_tags = [t for t in src_tags if parse_version(t)]
-if args.filter:
-    src_tags = [t for t in src_tags if re.search(args.filter, t)]
-src_tags = [parse_version(t) for t in src_tags]
-src_tags_grouped = defaultdict(list)
-for t in src_tags:
-    src_tags_grouped[(args.prefix or '') + t['major'] + ('-ce' if t['ce'] else '') + (t['rest'] or '') + (args.suffix or '')].append(t)
-for t in src_tags:
-    if t['minor']:
-        src_tags_grouped[(args.prefix or '') + t['major'] + '.' + t['minor'] + ('-ce' if t['ce'] else '') + (t['rest'] or '') + (args.suffix or '')].append(t)
-src_tags_latest = dict((k, str_version(max_version(src_tags_grouped[k]))) for k in src_tags_grouped.keys())
-
-dest_image = to_full_image_url(args.dest)
-dest_url = parse_image_url(args.dest)
-dest_host = dest_url['host']
-dest_protocol = dest_url['protocol']
-dest_name = dest_url['name']
-dest_api = dest_host
-
-if args.dest_registry_token:
-    print('>>> Use registry token for destination image.')
-    set_registry_token(dest_api, dest_name, args.dest_registry_token)
-    dest_skopeo_auth_args += ' --registry-token ' + args.dest_registry_token
-    src_dest_skopeo_auth_args += ' --dest-registry-token ' + args.dest_registry_token
-
-print('>>> Read destination tags for', dest_image)
-if args.only_use_skopeo:
-    dest_tags = execAndParseJsonWithRetryRateLimit('skopeo list-tags ' + dest_skopeo_auth_args + ' ' + dest_image)['Tags']
-else:
-    dest_tags = request_docker_registry(dest_api, dest_name, 'tags/list')['tags']
-# dest_tags = ['14.10.2', '14.10.3', '14.10', '14.11.1', '13.14.0', '13']
-dest_tags = [t for t in dest_tags if parse_version(t)]
-
-
 def mirror_image_tag(tag, dest_tag=None):
     # default_platform = {
     #     'os': 'linux',
@@ -562,27 +611,5 @@ def prepare_for_sort(v):
     return v
 
 
-src_tags_sorted = [t for t in src_tags]
-src_tags_sorted.sort(key=cmp_to_key(lambda x, y: compare_version(prepare_for_sort(x), prepare_for_sort(y))))
-src_tags_latest_sorted = [t for t in src_tags_latest.keys()]
-src_tags_latest_sorted.sort(key=cmp_to_key(lambda x, y: compare_version(None if x is None else prepare_for_sort(parse_version(x)), None if y is None else prepare_for_sort(parse_version(y)))))
-if args.update_latest:
-    src_tag_latest = str_version(max_version([parse_version(t) for t in src_tags_latest_sorted if t is not None]))
-
-print('New calculated tags are:')
-for dest_tag in src_tags_latest_sorted:
-    print('- ' + dest_tag + ' \t-> ' + src_tags_latest[dest_tag])
-if args.update_latest:
-    print('- latest \t-> ' + src_tags_latest[src_tag_latest])
-
-if not args.no_copy:
-    # mirror all existing tags
-    for src_tag in [str_version(t) for t in src_tags_sorted]:
-        if not args.only_new_tags or not src_tag in dest_tags:
-            mirror_image_tag(src_tag)
-
-    for dest_tag in src_tags_latest_sorted:
-        if not args.only_new_tags or not dest_tag in dest_tags:
-            mirror_image_tag(src_tags_latest[dest_tag], dest_tag)
-    if args.update_latest:
-        mirror_image_tag(src_tags_latest[src_tag_latest], 'latest')
+if __name__ == '__main__':
+    main()

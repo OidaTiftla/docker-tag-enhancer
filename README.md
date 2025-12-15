@@ -1,6 +1,17 @@
 # docker-tag-enhancer
 
+[![Test, Build and Deploy](https://github.com/OidaTiftla/docker-tag-enhancer/actions/workflows/docker-deploy.yml/badge.svg)](https://github.com/OidaTiftla/docker-tag-enhancer/actions/workflows/docker-deploy.yml)
+
 Add major and major.minor tags to docker images that have only major.minor.patch as tags available.
+
+## Features
+
+- 🏷️ Automatically generates major and major.minor tags from existing major.minor.patch tags
+- 🐳 Multi-architecture support
+- 🔍 Flexible filtering with regex, prefix, and suffix support
+- ⚡ Digest-based optimization (skips copying when images are identical)
+- 🧪 Comprehensive test suite
+- 🚀 Automated CI/CD pipeline with GitHub Actions
 
 ## Usage
 
@@ -50,4 +61,15 @@ jobs:
 ```bash
 docker buildx create --name mybuilder --use --bootstrap
 docker buildx build --push --platform linux/386,linux/amd64,linux/arm/v7,linux/arm64/v8 --pull -t oidatiftla/docker-tag-enhancer .
+```
+
+## Development
+
+### Running Tests
+
+The project includes a comprehensive test suite covering critical functionality.
+
+```bash
+# Run all tests
+./test.sh
 ```
