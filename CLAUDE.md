@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-docker-tag-enhancer is a Python-based tool that adds major and major.minor tags to Docker images that only have major.minor.patch tags. It reads tags from a source registry, calculates appropriate major/minor version tags, and copies them to a destination registry using skopeo.
+docker-tag-enhancer is a Python-based tool that adds hierarchical version tags to Docker images. It reads tags from a source registry (supporting 1-5 part semantic versions), calculates appropriate version tags at all hierarchical levels (e.g., from 1.2.3.4.5 it creates 1, 1.2, 1.2.3, and 1.2.3.4), and copies them to a destination registry using skopeo.
 
 ## Core Architecture
 
@@ -18,15 +18,18 @@ The tool operates in three modes:
 
 **Key implementation details:**
 
-- **Version parsing** (parse_version, line 193): Parses semantic versions with support for `-rc`, `-ce`, and custom suffixes. Uses regex to extract major/minor/patch components plus special suffixes.
+- **Version parsing** (parse_version, line 193): Parses semantic versions with support for 1-5 part versions (major, major.minor, major.minor.patch, major.minor.patch.build, major.minor.patch.build.build2). Supports `-rc`, `-ce`, and custom suffixes. Uses regex to extract version components plus special suffixes.
 
 - **Version comparison** (compare_version, line 226): Custom comparator that handles:
-  - Standard semver comparisons (major.minor.patch)
+  - Standard semver comparisons up to 5 parts (major.minor.patch.build.build2)
   - RC (release candidate) versions as pre-releases
   - CE (community edition) tags
+  - Less specific versions are treated as "greater" (e.g., 1.2.3 > 1.2.3.4)
   - Raises exception when versions with incompatible suffixes are compared
 
-- **Tag grouping** (lines 433-439): Groups parsed tags by major version and major.minor version to determine which tags need to be created/updated.
+- **Version grouping** (group_versions, line 409): Groups parsed tags hierarchically at all levels (major, major.minor, major.minor.patch, major.minor.patch.build, major.minor.patch.build.build2). Supports prefix and suffix parameters for tag naming.
+
+- **Latest tag calculation** (calculate_latest_tags, line 455): Calculates the latest version for each group. Excludes identity mappings where the key equals the value (e.g., '14.10.2': '14.10.2' is excluded, but '14.10': '14.10.2' is retained).
 
 - **Authentication handling**:
   - Docker config file auth (get_auth_from_config, line 379)
@@ -46,6 +49,18 @@ When not using `--only-use-skopeo`, the tool directly interacts with Docker Regi
 - Token auth via request_docker_registry (line 352) with automatic WWW-Authenticate handling
 
 ## Development Commands
+
+### Running tests
+
+```bash
+# Run all tests with linting
+./test.sh
+```
+
+The test suite includes:
+- Unit tests for version parsing, comparison, grouping, and calculation (src/test_run.py)
+- Integration tests with mocked registries (src/test_integration.py)
+- Support for testing 3, 4, and 5-part versions
 
 ### Running locally (requires Python 3.13+, skopeo, jq)
 
@@ -116,10 +131,12 @@ skopeo list-tags --registry-token="${ENCODED}" docker://ghcr.io/owner/image
 
 ### Version Parsing Edge Cases
 
-- Versions without minor/patch components are supported (e.g., "13" is valid)
+- Versions with 1-5 parts are supported (e.g., "13", "13.0", "13.0.1", "13.0.1.2", "13.0.1.2.3")
+- Versions without minor/patch components are valid (e.g., "13" parses as major-only)
 - RC and CE suffixes follow specific patterns: `-rc<num>`, `-rc<num>.ce.<num>`, `-ce.<num>`
 - Arbitrary rest suffixes are preserved but treated as incomparable between different rest values
 - The filter regex is applied AFTER version parsing, so only valid semver-like tags are processed
+- When comparing versions, less specific versions are treated as "greater" than more specific ones with the same base (e.g., 1.2.3 > 1.2.3.4 > 1.2.3.4.5)
 
 ### Multi-architecture Support
 
