@@ -294,7 +294,7 @@ def parse_version(text):
             return None
         text = text[:len(text) - len(args.suffix)]
 
-    m = re.search(r'^(?P<major>0|[1-9]\d*)(?:\.(?P<minor>0|[1-9]\d*)(?:\.(?P<patch>0|[1-9]\d*))?)?(-((rc(?P<rc>0|[1-9]\d*)\.)?ce\.(?P<ce>0|[1-9]\d*)|rc(?P<rc2>0|[1-9]\d*)))?(?P<rest>-.*)?$', text)
+    m = re.search(r'^(?P<major>0|[1-9]\d*)(?:\.(?P<minor>0|[1-9]\d*)(?:\.(?P<patch>0|[1-9]\d*)(?:\.(?P<build>0|[1-9]\d*)(?:\.(?P<build2>0|[1-9]\d*))?)?)?)?(-((rc(?P<rc>0|[1-9]\d*)\.)?ce\.(?P<ce>0|[1-9]\d*)|rc(?P<rc2>0|[1-9]\d*)))?(?P<rest>-.*)?$', text)
     if not m:
         return None
     result = m.groupdict()
@@ -309,6 +309,8 @@ def str_version(v):
         v['major'] + \
         ('.' + v['minor'] if v['minor'] else '') + \
         ('.' + v['patch'] if v['patch'] else '') + \
+        ('.' + v['build'] if 'build' in v and v['build'] else '') + \
+        ('.' + v['build2'] if 'build2' in v and v['build2'] else '') + \
         ('-rc' + v['rc'] + '.ce.' + v['ce'] if 'rc' in v and v['rc'] and 'ce' in v and v['ce'] else '') + \
         ('-rc' + v['rc'] if 'rc' in v and v['rc'] and ('ce' not in v or not v['ce']) else '') + \
         ('-ce.' + v['ce'] if ('rc' not in v or not v['rc']) and 'ce' in v and v['ce'] else '') + \
@@ -354,6 +356,26 @@ def compare_version(v1, v2):
     elif v1['patch'] and not v2['patch']:
         return -1
     elif not v1['patch'] and v2['patch']:
+        return 1
+
+    if 'build' in v1 and 'build' in v2 and v1['build'] and v2['build']:
+        if int(v1['build']) < int(v2['build']):
+            return -1
+        elif int(v1['build']) > int(v2['build']):
+            return 1
+    elif 'build' in v1 and v1['build'] and ('build' not in v2 or not v2['build']):
+        return -1
+    elif ('build' not in v1 or not v1['build']) and 'build' in v2 and v2['build']:
+        return 1
+
+    if 'build2' in v1 and 'build2' in v2 and v1['build2'] and v2['build2']:
+        if int(v1['build2']) < int(v2['build2']):
+            return -1
+        elif int(v1['build2']) > int(v2['build2']):
+            return 1
+    elif 'build2' in v1 and v1['build2'] and ('build2' not in v2 or not v2['build2']):
+        return -1
+    elif ('build2' not in v1 or not v1['build2']) and 'build2' in v2 and v2['build2']:
         return 1
 
     if v1['rc'] and v2['rc']:

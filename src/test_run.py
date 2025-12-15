@@ -97,7 +97,57 @@ class TestVersionParsing(unittest.TestCase):
         """Test that invalid versions return None"""
         self.assertIsNone(run.parse_version('invalid'))
         self.assertIsNone(run.parse_version('v1.2.3'))  # prefix not allowed without args.prefix
-        self.assertIsNone(run.parse_version('1.2.3.4'))  # too many components
+
+    def test_parse_four_part_version(self):
+        """Test parsing 4-part versions (major.minor.patch.build)"""
+        result = run.parse_version('1.2.3.4')
+        self.assertIsNotNone(result)
+        self.assertEqual(result['major'], '1')
+        self.assertEqual(result['minor'], '2')
+        self.assertEqual(result['patch'], '3')
+        self.assertEqual(result['build'], '4')
+        self.assertIsNone(result['rc'])
+        self.assertIsNone(result['ce'])
+
+    def test_parse_five_part_version(self):
+        """Test parsing 5-part versions"""
+        result = run.parse_version('1.2.3.4.5')
+        self.assertIsNotNone(result)
+        self.assertEqual(result['major'], '1')
+        self.assertEqual(result['minor'], '2')
+        self.assertEqual(result['patch'], '3')
+        self.assertEqual(result['build'], '4')
+        self.assertEqual(result['build2'], '5')
+
+    def test_parse_four_part_with_rc(self):
+        """Test parsing 4-part versions with RC suffix"""
+        result = run.parse_version('1.2.3.4-rc1')
+        self.assertIsNotNone(result)
+        self.assertEqual(result['major'], '1')
+        self.assertEqual(result['minor'], '2')
+        self.assertEqual(result['patch'], '3')
+        self.assertEqual(result['build'], '4')
+        self.assertEqual(result['rc'], '1')
+
+    def test_parse_four_part_with_ce(self):
+        """Test parsing 4-part versions with CE suffix"""
+        result = run.parse_version('1.2.3.4-ce.5')
+        self.assertIsNotNone(result)
+        self.assertEqual(result['major'], '1')
+        self.assertEqual(result['minor'], '2')
+        self.assertEqual(result['patch'], '3')
+        self.assertEqual(result['build'], '4')
+        self.assertEqual(result['ce'], '5')
+
+    def test_parse_four_part_with_rest(self):
+        """Test parsing 4-part versions with additional suffix"""
+        result = run.parse_version('1.2.3.4-alpine')
+        self.assertIsNotNone(result)
+        self.assertEqual(result['major'], '1')
+        self.assertEqual(result['minor'], '2')
+        self.assertEqual(result['patch'], '3')
+        self.assertEqual(result['build'], '4')
+        self.assertEqual(result['rest'], '-alpine')
 
     def test_parse_with_prefix(self):
         """Test parsing with prefix filter"""
@@ -199,6 +249,38 @@ class TestVersionComparison(unittest.TestCase):
         self.assertEqual(run.compare_version(None, v1), -1)
         self.assertEqual(run.compare_version(v1, None), 1)
 
+    def test_compare_four_part_versions(self):
+        """Test comparing 4-part versions"""
+        v1 = run.parse_version('1.2.3.4')
+        v2 = run.parse_version('1.2.3.5')
+        self.assertEqual(run.compare_version(v1, v2), -1)
+        self.assertEqual(run.compare_version(v2, v1), 1)
+
+        v3 = run.parse_version('1.2.3.4')
+        self.assertEqual(run.compare_version(v1, v3), 0)
+
+    def test_compare_four_part_vs_three_part(self):
+        """Test comparing 4-part vs 3-part versions"""
+        v1 = run.parse_version('1.2.3')
+        v2 = run.parse_version('1.2.3.4')
+        # 1.2.3 without build should be greater (less specific, like how major without minor works)
+        self.assertEqual(run.compare_version(v1, v2), 1)
+        self.assertEqual(run.compare_version(v2, v1), -1)
+
+    def test_compare_five_part_versions(self):
+        """Test comparing 5-part versions"""
+        v1 = run.parse_version('1.2.3.4.5')
+        v2 = run.parse_version('1.2.3.4.6')
+        self.assertEqual(run.compare_version(v1, v2), -1)
+        self.assertEqual(run.compare_version(v2, v1), 1)
+
+    def test_compare_different_build_numbers(self):
+        """Test comparing versions with different build numbers"""
+        v1 = run.parse_version('14.10.2.100')
+        v2 = run.parse_version('14.10.2.200')
+        self.assertEqual(run.compare_version(v1, v2), -1)
+        self.assertEqual(run.compare_version(v2, v1), 1)
+
 
 class TestVersionString(unittest.TestCase):
     """Test version string reconstruction"""
@@ -231,6 +313,21 @@ class TestVersionString(unittest.TestCase):
         run.args.suffix = '-alpine'
         v = run.parse_version('v14.10.2-alpine')
         self.assertEqual(run.str_version(v), 'v14.10.2-alpine')
+
+    def test_str_version_four_part(self):
+        """Test reconstructing 4-part version"""
+        v = run.parse_version('1.2.3.4')
+        self.assertEqual(run.str_version(v), '1.2.3.4')
+
+    def test_str_version_five_part(self):
+        """Test reconstructing 5-part version"""
+        v = run.parse_version('1.2.3.4.5')
+        self.assertEqual(run.str_version(v), '1.2.3.4.5')
+
+    def test_str_version_four_part_with_rc(self):
+        """Test reconstructing 4-part version with RC"""
+        v = run.parse_version('1.2.3.4-rc1')
+        self.assertEqual(run.str_version(v), '1.2.3.4-rc1')
 
 
 class TestMaxVersion(unittest.TestCase):
@@ -483,7 +580,6 @@ class TestEndToEndTagCalculation(unittest.TestCase):
         src_tags = [t for t in src_tags if t]
 
         # Apply filter as in run.py line 431
-        original_tags = [run.str_version(t) for t in src_tags]
         filtered_tags = [run.str_version(t) for t in src_tags if re.search(run.args.filter, run.str_version(t))]
 
         # Should exclude RC versions and versions starting with 8, 9, 10, 11, 12
