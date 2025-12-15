@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.19
-FROM python:3.13.7-slim
+FROM python:3.14.2-slim
 
 LABEL org.opencontainers.image.description="Python base image with Nix package manager preinstalled"
 
