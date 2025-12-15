@@ -1,10 +1,6 @@
 #!/usr/bin/env python3
 
 import unittest
-from unittest.mock import Mock, patch, MagicMock
-import sys
-import json
-from io import StringIO
 
 # Import the functions we want to test
 # We'll need to refactor run.py to make functions testable without global args

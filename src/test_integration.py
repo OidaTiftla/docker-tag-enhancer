@@ -6,11 +6,8 @@ These tests simulate the complete workflow without accessing real registries.
 """
 
 import unittest
-from unittest.mock import Mock, patch, MagicMock, call
-import sys
-import json
+from unittest.mock import patch
 from collections import defaultdict
-from io import StringIO
 
 import run
 
@@ -79,7 +76,6 @@ class TestIntegrationWithMockedRegistry(unittest.TestCase):
 
         # Parse tags as the main script would
         src_tags = [t for t in [run.parse_version(t) for t in self.mock_src_tags] if t]
-        dest_tags = [t for t in self.mock_dest_tags]
 
         # Group and calculate (lines 433-439 from run.py)
         src_tags_grouped = defaultdict(list)
