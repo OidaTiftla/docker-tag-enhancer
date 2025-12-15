@@ -281,6 +281,64 @@ class TestVersionComparison(unittest.TestCase):
         self.assertEqual(run.compare_version(v1, v2), -1)
         self.assertEqual(run.compare_version(v2, v1), 1)
 
+    def test_compare_different_build2_numbers(self):
+        """Test comparing versions with different build2 numbers"""
+        v1 = run.parse_version('14.10.2.3.100')
+        v2 = run.parse_version('14.10.2.3.200')
+        self.assertEqual(run.compare_version(v1, v2), -1)
+        self.assertEqual(run.compare_version(v2, v1), 1)
+
+    def test_compare_five_part_vs_four_part(self):
+        """Test comparing 5-part vs 4-part versions"""
+        v1 = run.parse_version('1.2.3.4')
+        v2 = run.parse_version('1.2.3.4.5')
+        # Version without build2 should be greater (less specific)
+        self.assertEqual(run.compare_version(v1, v2), 1)
+        self.assertEqual(run.compare_version(v2, v1), -1)
+
+    def test_compare_mixed_parts_same_base(self):
+        """Test comparing versions with same base but different parts"""
+        v3 = run.parse_version('14.10.2')
+        v4 = run.parse_version('14.10.2.0')
+        v5 = run.parse_version('14.10.2.0.0')
+
+        # 3-part > 4-part > 5-part (less specific is "greater")
+        self.assertEqual(run.compare_version(v3, v4), 1)
+        self.assertEqual(run.compare_version(v4, v5), 1)
+        self.assertEqual(run.compare_version(v3, v5), 1)
+
+    def test_compare_four_part_different_patches(self):
+        """Test 4-part versions with different patch numbers"""
+        v1 = run.parse_version('1.2.3.10')
+        v2 = run.parse_version('1.2.4.5')
+        # 1.2.4.x should be greater than 1.2.3.x
+        self.assertEqual(run.compare_version(v1, v2), -1)
+        self.assertEqual(run.compare_version(v2, v1), 1)
+
+    def test_compare_five_part_different_patches(self):
+        """Test 5-part versions with different patch numbers"""
+        v1 = run.parse_version('1.2.3.5.100')
+        v2 = run.parse_version('1.2.4.1.1')
+        # 1.2.4.x.x should be greater than 1.2.3.x.x
+        self.assertEqual(run.compare_version(v1, v2), -1)
+        self.assertEqual(run.compare_version(v2, v1), 1)
+
+    def test_compare_four_part_with_rc_vs_without(self):
+        """Test 4-part RC version vs non-RC"""
+        v1 = run.parse_version('1.2.3.4-rc1')
+        v2 = run.parse_version('1.2.3.4')
+        # RC should be less than non-RC
+        self.assertEqual(run.compare_version(v1, v2), -1)
+        self.assertEqual(run.compare_version(v2, v1), 1)
+
+    def test_compare_five_part_with_rc_vs_without(self):
+        """Test 5-part RC version vs non-RC"""
+        v1 = run.parse_version('1.2.3.4.5-rc2')
+        v2 = run.parse_version('1.2.3.4.5')
+        # RC should be less than non-RC
+        self.assertEqual(run.compare_version(v1, v2), -1)
+        self.assertEqual(run.compare_version(v2, v1), 1)
+
 
 class TestVersionString(unittest.TestCase):
     """Test version string reconstruction"""
@@ -329,6 +387,36 @@ class TestVersionString(unittest.TestCase):
         v = run.parse_version('1.2.3.4-rc1')
         self.assertEqual(run.str_version(v), '1.2.3.4-rc1')
 
+    def test_str_version_four_part_with_ce(self):
+        """Test reconstructing 4-part version with CE"""
+        v = run.parse_version('1.2.3.4-ce.5')
+        self.assertEqual(run.str_version(v), '1.2.3.4-ce.5')
+
+    def test_str_version_four_part_with_rc_ce(self):
+        """Test reconstructing 4-part version with RC and CE"""
+        v = run.parse_version('1.2.3.4-rc2.ce.3')
+        self.assertEqual(run.str_version(v), '1.2.3.4-rc2.ce.3')
+
+    def test_str_version_four_part_with_rest(self):
+        """Test reconstructing 4-part version with rest suffix"""
+        v = run.parse_version('1.2.3.4-alpine')
+        self.assertEqual(run.str_version(v), '1.2.3.4-alpine')
+
+    def test_str_version_five_part_with_rc(self):
+        """Test reconstructing 5-part version with RC"""
+        v = run.parse_version('1.2.3.4.5-rc1')
+        self.assertEqual(run.str_version(v), '1.2.3.4.5-rc1')
+
+    def test_str_version_five_part_with_ce(self):
+        """Test reconstructing 5-part version with CE"""
+        v = run.parse_version('1.2.3.4.5-ce.2')
+        self.assertEqual(run.str_version(v), '1.2.3.4.5-ce.2')
+
+    def test_str_version_five_part_with_rest(self):
+        """Test reconstructing 5-part version with rest suffix"""
+        v = run.parse_version('1.2.3.4.5-debian')
+        self.assertEqual(run.str_version(v), '1.2.3.4.5-debian')
+
 
 class TestMaxVersion(unittest.TestCase):
     """Test finding maximum version from a list"""
@@ -340,7 +428,7 @@ class TestMaxVersion(unittest.TestCase):
     def tearDown(self):
         run.args = self.original_args
 
-    def test_max_version_simple(self):
+    def test_max_version_simple_3parts(self):
         """Test finding max from simple versions"""
         versions = [
             run.parse_version('14.10.1'),
@@ -350,7 +438,7 @@ class TestMaxVersion(unittest.TestCase):
         max_v = run.max_version(versions)
         self.assertEqual(run.str_version(max_v), '14.10.3')
 
-    def test_max_version_with_rc(self):
+    def test_max_version_with_rc_3parts(self):
         """Test that non-RC is greater than RC"""
         versions = [
             run.parse_version('14.10.0-rc1'),
@@ -360,7 +448,7 @@ class TestMaxVersion(unittest.TestCase):
         max_v = run.max_version(versions)
         self.assertEqual(run.str_version(max_v), '14.10.0')
 
-    def test_max_version_mixed(self):
+    def test_max_version_mixed_3parts(self):
         """Test finding max from mixed version types"""
         versions = [
             run.parse_version('13.14.0'),
@@ -370,6 +458,68 @@ class TestMaxVersion(unittest.TestCase):
         ]
         max_v = run.max_version(versions)
         self.assertEqual(run.str_version(max_v), '14.11.1-rc1')
+
+    def test_max_version_simple_4parts(self):
+        """Test finding max from simple versions"""
+        versions = [
+            run.parse_version('7.14.10.1'),
+            run.parse_version('7.14.10.2'),
+            run.parse_version('7.14.10.3'),
+        ]
+        max_v = run.max_version(versions)
+        self.assertEqual(run.str_version(max_v), '7.14.10.3')
+
+    def test_max_version_with_rc_4parts(self):
+        """Test that non-RC is greater than RC"""
+        versions = [
+            run.parse_version('7.14.10.0-rc1'),
+            run.parse_version('7.14.10.0-rc2'),
+            run.parse_version('7.14.10.0'),
+        ]
+        max_v = run.max_version(versions)
+        self.assertEqual(run.str_version(max_v), '7.14.10.0')
+
+    def test_max_version_mixed_4parts(self):
+        """Test finding max from mixed version types"""
+        versions = [
+            run.parse_version('7.13.14.0'),
+            run.parse_version('7.14.10.2'),
+            run.parse_version('7.14.10.3'),
+            run.parse_version('7.14.11.1-rc1'),
+        ]
+        max_v = run.max_version(versions)
+        self.assertEqual(run.str_version(max_v), '7.14.11.1-rc1')
+
+    def test_max_version_simple_5parts(self):
+        """Test finding max from simple versions"""
+        versions = [
+            run.parse_version('2.7.14.10.1'),
+            run.parse_version('2.7.14.10.2'),
+            run.parse_version('2.7.14.10.3'),
+        ]
+        max_v = run.max_version(versions)
+        self.assertEqual(run.str_version(max_v), '2.7.14.10.3')
+
+    def test_max_version_with_rc_5parts(self):
+        """Test that non-RC is greater than RC"""
+        versions = [
+            run.parse_version('2.7.14.10.0-rc1'),
+            run.parse_version('2.7.14.10.0-rc2'),
+            run.parse_version('2.7.14.10.0'),
+        ]
+        max_v = run.max_version(versions)
+        self.assertEqual(run.str_version(max_v), '2.7.14.10.0')
+
+    def test_max_version_mixed_5parts(self):
+        """Test finding max from mixed version types"""
+        versions = [
+            run.parse_version('2.7.13.14.0'),
+            run.parse_version('2.7.14.10.2'),
+            run.parse_version('2.7.14.10.3'),
+            run.parse_version('2.7.14.11.1-rc1'),
+        ]
+        max_v = run.max_version(versions)
+        self.assertEqual(run.str_version(max_v), '2.7.14.11.1-rc1')
 
 
 class TestImageUrlParsing(unittest.TestCase):
@@ -410,8 +560,8 @@ class TestImageUrlParsing(unittest.TestCase):
         )
 
 
-class TestTagCalculation(unittest.TestCase):
-    """Test the core tag calculation logic"""
+class TestVersionGrouping(unittest.TestCase):
+    """Test version grouping logic"""
 
     def setUp(self):
         self.original_args = run.args
@@ -420,89 +570,242 @@ class TestTagCalculation(unittest.TestCase):
     def tearDown(self):
         run.args = self.original_args
 
-    def test_tag_grouping_simple(self):
-        """Test grouping tags by major and major.minor"""
+    def test_group_versions_3part_simple(self):
+        """Test grouping 3-part versions by major and major.minor"""
         src_tags_str = ['14.10.2', '14.10.3', '14.11.1', '13.14.0']
         src_tags = [run.parse_version(t) for t in src_tags_str]
 
-        # Replicate the grouping logic from run.py
-        src_tags_grouped = {}
-        for t in src_tags:
-            # Group by major
-            major_key = t['major']
-            if major_key not in src_tags_grouped:
-                src_tags_grouped[major_key] = []
-            src_tags_grouped[major_key].append(t)
+        grouped = run.group_versions(src_tags)
 
-            # Group by major.minor if minor exists
-            if t['minor']:
-                minor_key = t['major'] + '.' + t['minor']
-                if minor_key not in src_tags_grouped:
-                    src_tags_grouped[minor_key] = []
-                src_tags_grouped[minor_key].append(t)
+        # Convert grouped values to version strings for easier comparison
+        grouped_strings = {k: [run.str_version(v) for v in versions] for k, versions in grouped.items()}
 
-        # Check major groups
-        self.assertIn('14', src_tags_grouped)
-        self.assertIn('13', src_tags_grouped)
-        self.assertEqual(len(src_tags_grouped['14']), 3)  # 14.10.2, 14.10.3, 14.11.1
-        self.assertEqual(len(src_tags_grouped['13']), 1)  # 13.14.0
+        expected = {
+            '14': ['14.10.2', '14.10.3', '14.11.1'],
+            '13': ['13.14.0'],
+            '14.10': ['14.10.2', '14.10.3'],
+            '14.11': ['14.11.1'],
+            '13.14': ['13.14.0'],
+            '14.10.2': ['14.10.2'],
+            '14.10.3': ['14.10.3'],
+            '14.11.1': ['14.11.1'],
+            '13.14.0': ['13.14.0'],
+        }
 
-        # Check major.minor groups
-        self.assertIn('14.10', src_tags_grouped)
-        self.assertIn('14.11', src_tags_grouped)
-        self.assertEqual(len(src_tags_grouped['14.10']), 2)  # 14.10.2, 14.10.3
-        self.assertEqual(len(src_tags_grouped['14.11']), 1)  # 14.11.1
+        self.assertEqual(grouped_strings, expected)
 
-        # Find max versions for each group
-        src_tags_latest = {}
-        for k in src_tags_grouped.keys():
-            max_v = run.max_version(src_tags_grouped[k])
-            src_tags_latest[k] = run.str_version(max_v)
-
-        # Verify calculated tags
-        self.assertEqual(src_tags_latest['14'], '14.11.1')  # Latest in major 14
-        self.assertEqual(src_tags_latest['13'], '13.14.0')  # Latest in major 13
-        self.assertEqual(src_tags_latest['14.10'], '14.10.3')  # Latest in 14.10
-        self.assertEqual(src_tags_latest['14.11'], '14.11.1')  # Latest in 14.11
-
-    def test_tag_grouping_with_rc(self):
-        """Test that RC versions are properly grouped and compared"""
+    def test_group_versions_with_rc(self):
+        """Test grouping versions with RC suffixes"""
         src_tags_str = ['14.10.0', '14.10.1-rc1', '14.10.1-rc2', '14.10.1']
         src_tags = [run.parse_version(t) for t in src_tags_str]
 
-        src_tags_grouped = {}
-        for t in src_tags:
-            major_minor_key = t['major'] + '.' + t['minor']
-            if major_minor_key not in src_tags_grouped:
-                src_tags_grouped[major_minor_key] = []
-            src_tags_grouped[major_minor_key].append(t)
+        grouped = run.group_versions(src_tags)
 
-        max_v = run.max_version(src_tags_grouped['14.10'])
-        # The final release should be greater than RC versions
-        self.assertEqual(run.str_version(max_v), '14.10.1')
+        # Convert grouped values to version strings for easier comparison
+        grouped_strings = {k: [run.str_version(v) for v in versions] for k, versions in grouped.items()}
 
-    def test_tag_grouping_with_suffix(self):
+        expected = {
+            '14': ['14.10.0', '14.10.1-rc1', '14.10.1-rc2', '14.10.1'],
+            '14.10': ['14.10.0', '14.10.1-rc1', '14.10.1-rc2', '14.10.1'],
+            '14.10.0': ['14.10.0'],
+            '14.10.1': ['14.10.1-rc1', '14.10.1-rc2', '14.10.1'],
+        }
+
+        self.assertEqual(grouped_strings, expected)
+
+    def test_group_versions_with_rest_suffix(self):
         """Test grouping with rest suffixes"""
         src_tags_str = ['13-alpine', '13-rc1-alpine', '13-rc2-alpine']
+        src_tags = [run.parse_version(t) for t in src_tags_str]
 
-        # Manually parse with rest suffix
-        src_tags = []
-        for tag in src_tags_str:
-            v = run.parse_version(tag)
-            if v:
-                src_tags.append(v)
+        grouped = run.group_versions(src_tags)
 
-        # Group by major + rest
-        src_tags_grouped = {}
-        for t in src_tags:
-            key = t['major'] + (t['rest'] or '')
-            if key not in src_tags_grouped:
-                src_tags_grouped[key] = []
-            src_tags_grouped[key].append(t)
+        # Convert grouped values to version strings for easier comparison
+        grouped_strings = {k: [run.str_version(v) for v in versions] for k, versions in grouped.items()}
 
-        # All should be in the same group
-        self.assertIn('13-alpine', src_tags_grouped)
-        self.assertEqual(len(src_tags_grouped['13-alpine']), 3)
+        expected = {
+            '13-alpine': ['13-alpine', '13-rc1-alpine', '13-rc2-alpine'],
+        }
+
+        self.assertEqual(grouped_strings, expected)
+
+    def test_group_versions_4part(self):
+        """Test grouping 4-part version tags"""
+        src_tags_str = ['7.14.10.2', '7.14.10.3', '7.14.11.1', '7.13.14.0']
+        src_tags = [run.parse_version(t) for t in src_tags_str]
+
+        grouped = run.group_versions(src_tags)
+
+        # Convert grouped values to version strings for easier comparison
+        grouped_strings = {k: [run.str_version(v) for v in versions] for k, versions in grouped.items()}
+
+        expected = {
+            '7': ['7.14.10.2', '7.14.10.3', '7.14.11.1', '7.13.14.0'],
+            '7.14': ['7.14.10.2', '7.14.10.3', '7.14.11.1'],
+            '7.13': ['7.13.14.0'],
+            '7.14.10': ['7.14.10.2', '7.14.10.3'],
+            '7.14.11': ['7.14.11.1'],
+            '7.13.14': ['7.13.14.0'],
+            '7.14.10.2': ['7.14.10.2'],
+            '7.14.10.3': ['7.14.10.3'],
+            '7.14.11.1': ['7.14.11.1'],
+            '7.13.14.0': ['7.13.14.0'],
+        }
+
+        self.assertEqual(grouped_strings, expected)
+
+    def test_group_versions_5part(self):
+        """Test grouping 5-part version tags"""
+        src_tags_str = ['2.7.14.10.2', '2.7.14.10.3', '2.7.14.11.1', '2.7.13.14.0']
+        src_tags = [run.parse_version(t) for t in src_tags_str]
+
+        grouped = run.group_versions(src_tags)
+
+        # Convert grouped values to version strings for easier comparison
+        grouped_strings = {k: [run.str_version(v) for v in versions] for k, versions in grouped.items()}
+
+        expected = {
+            '2': ['2.7.14.10.2', '2.7.14.10.3', '2.7.14.11.1', '2.7.13.14.0'],
+            '2.7': ['2.7.14.10.2', '2.7.14.10.3', '2.7.14.11.1', '2.7.13.14.0'],
+            '2.7.14': ['2.7.14.10.2', '2.7.14.10.3', '2.7.14.11.1'],
+            '2.7.13': ['2.7.13.14.0'],
+            '2.7.14.10': ['2.7.14.10.2', '2.7.14.10.3'],
+            '2.7.14.11': ['2.7.14.11.1'],
+            '2.7.13.14': ['2.7.13.14.0'],
+            '2.7.14.10.2': ['2.7.14.10.2'],
+            '2.7.14.10.3': ['2.7.14.10.3'],
+            '2.7.14.11.1': ['2.7.14.11.1'],
+            '2.7.13.14.0': ['2.7.13.14.0'],
+        }
+
+        self.assertEqual(grouped_strings, expected)
+
+    def test_group_versions_mixed_parts(self):
+        """Test grouping tags with different part counts (3, 4, 5)"""
+        src_tags_str = ['14.10.2', '14.10.2.1', '14.10.2.1.5', '14.11.1']
+        src_tags = [run.parse_version(t) for t in src_tags_str]
+
+        grouped = run.group_versions(src_tags)
+
+        # Convert grouped values to version strings for easier comparison
+        grouped_strings = {k: [run.str_version(v) for v in versions] for k, versions in grouped.items()}
+
+        expected = {
+            '14': ['14.10.2', '14.10.2.1', '14.10.2.1.5', '14.11.1'],
+            '14.10': ['14.10.2', '14.10.2.1', '14.10.2.1.5'],
+            '14.11': ['14.11.1'],
+            '14.10.2': ['14.10.2', '14.10.2.1', '14.10.2.1.5'],
+            '14.11.1': ['14.11.1'],
+            '14.10.2.1': ['14.10.2.1', '14.10.2.1.5'],
+            '14.10.2.1.5': ['14.10.2.1.5'],
+        }
+
+        self.assertEqual(grouped_strings, expected)
+
+    def test_group_versions_with_prefix_suffix(self):
+        """Test grouping with prefix and suffix"""
+        # Set up prefix and suffix in args for parsing
+        run.args.prefix = 'v'
+        run.args.suffix = '-alpine'
+
+        src_tags_str = ['v14.10.2-alpine', 'v14.10.3-alpine', 'v14.11.1-alpine']
+        src_tags = [run.parse_version(t) for t in src_tags_str]
+
+        grouped = run.group_versions(src_tags, prefix='v', suffix='-alpine')
+
+        # Convert grouped values to version strings for easier comparison
+        grouped_strings = {k: [run.str_version(v) for v in versions] for k, versions in grouped.items()}
+
+        expected = {
+            'v14-alpine': ['v14.10.2-alpine', 'v14.10.3-alpine', 'v14.11.1-alpine'],
+            'v14.10-alpine': ['v14.10.2-alpine', 'v14.10.3-alpine'],
+            'v14.11-alpine': ['v14.11.1-alpine'],
+            'v14.10.2-alpine': ['v14.10.2-alpine'],
+            'v14.10.3-alpine': ['v14.10.3-alpine'],
+            'v14.11.1-alpine': ['v14.11.1-alpine'],
+        }
+
+        self.assertEqual(grouped_strings, expected)
+
+
+class TestCalculateLatestTags(unittest.TestCase):
+    """Test the calculate_latest_tags function"""
+
+    def setUp(self):
+        self.original_args = run.args
+        run.args = MockArgs()
+
+    def tearDown(self):
+        run.args = self.original_args
+
+    def test_calculate_latest_tags_3part(self):
+        """Test calculating latest tags for 3-part versions"""
+        src_tags_str = ['14.10.2', '14.10.3', '14.11.1', '13.14.0']
+        src_tags = [run.parse_version(t) for t in src_tags_str]
+
+        grouped = run.group_versions(src_tags)
+        latest = run.calculate_latest_tags(grouped)
+
+        expected = {
+            '14': '14.11.1',
+            '13': '13.14.0',
+            '14.10': '14.10.3',
+            '14.11': '14.11.1',
+            '13.14': '13.14.0',
+        }
+
+        self.assertEqual(latest, expected)
+
+    def test_calculate_latest_tags_4part(self):
+        """Test calculating latest tags for 4-part versions"""
+        src_tags_str = ['7.14.10.2', '7.14.10.3', '7.14.11.1']
+        src_tags = [run.parse_version(t) for t in src_tags_str]
+
+        grouped = run.group_versions(src_tags)
+        latest = run.calculate_latest_tags(grouped)
+
+        expected = {
+            '7': '7.14.11.1',
+            '7.14': '7.14.11.1',
+            '7.14.10': '7.14.10.3',
+            '7.14.11': '7.14.11.1',
+        }
+
+        self.assertEqual(latest, expected)
+
+    def test_calculate_latest_tags_5part(self):
+        """Test calculating latest tags for 5-part versions"""
+        src_tags_str = ['2.7.14.10.2', '2.7.14.10.3', '2.7.14.11.1']
+        src_tags = [run.parse_version(t) for t in src_tags_str]
+
+        grouped = run.group_versions(src_tags)
+        latest = run.calculate_latest_tags(grouped)
+
+        expected = {
+            '2': '2.7.14.11.1',
+            '2.7': '2.7.14.11.1',
+            '2.7.14': '2.7.14.11.1',
+            '2.7.14.10': '2.7.14.10.3',
+            '2.7.14.11': '2.7.14.11.1',
+        }
+
+        self.assertEqual(latest, expected)
+
+    def test_calculate_latest_tags_with_rc(self):
+        """Test calculating latest tags with RC versions"""
+        src_tags_str = ['14.10.0', '14.10.1-rc1', '14.10.1-rc2', '14.10.1']
+        src_tags = [run.parse_version(t) for t in src_tags_str]
+
+        grouped = run.group_versions(src_tags)
+        latest = run.calculate_latest_tags(grouped)
+
+        # Non-RC version should be selected as latest
+        expected = {
+            '14': '14.10.1',
+            '14.10': '14.10.1',
+        }
+
+        self.assertEqual(latest, expected)
 
 
 class TestEndToEndTagCalculation(unittest.TestCase):
@@ -525,33 +828,13 @@ class TestEndToEndTagCalculation(unittest.TestCase):
             'invalid-tag',  # Should be filtered out
         ]
 
-        # Parse and filter (same as run.py lines 429-432)
+        # Parse and filter
         src_tags = [run.parse_version(t) for t in src_tags_raw]
         src_tags = [t for t in src_tags if t]  # Filter None values
 
-        # Group tags (same as run.py lines 433-438)
-        from collections import defaultdict
-        src_tags_grouped = defaultdict(list)
-        for t in src_tags:
-            major_key = (run.args.prefix or '') + t['major'] + \
-                       ('-ce' if t.get('ce') else '') + \
-                       (t.get('rest') or '') + \
-                       (run.args.suffix or '')
-            src_tags_grouped[major_key].append(t)
-
-        for t in src_tags:
-            if t['minor']:
-                minor_key = (run.args.prefix or '') + t['major'] + '.' + t['minor'] + \
-                           ('-ce' if t.get('ce') else '') + \
-                           (t.get('rest') or '') + \
-                           (run.args.suffix or '')
-                src_tags_grouped[minor_key].append(t)
-
-        # Calculate latest for each group (same as run.py line 439)
-        src_tags_latest = dict(
-            (k, run.str_version(run.max_version(src_tags_grouped[k])))
-            for k in src_tags_grouped.keys()
-        )
+        # Group tags and calculate latest
+        src_tags_grouped = run.group_versions(src_tags, prefix=run.args.prefix or '', suffix=run.args.suffix or '')
+        src_tags_latest = run.calculate_latest_tags(src_tags_grouped)
 
         # Verify expected tag mappings
         expected = {
@@ -595,17 +878,9 @@ class TestEndToEndTagCalculation(unittest.TestCase):
         src_tags_raw = ['14.10.2', '14.10.3', '13.14.0', '15.0.0-rc1', '14.11.1']
         src_tags = [t for t in [run.parse_version(t) for t in src_tags_raw] if t]
 
-        # Group tags
-        from collections import defaultdict
-        src_tags_grouped = defaultdict(list)
-        for t in src_tags:
-            major_key = t['major']
-            src_tags_grouped[major_key].append(t)
-
-        src_tags_latest = dict(
-            (k, run.str_version(run.max_version(src_tags_grouped[k])))
-            for k in src_tags_grouped.keys()
-        )
+        # Group tags and calculate latest
+        src_tags_grouped = run.group_versions(src_tags)
+        src_tags_latest = run.calculate_latest_tags(src_tags_grouped)
 
         # Sort the grouped keys to find overall latest (lines 567-570)
         def prepare_for_sort(v):
@@ -633,6 +908,115 @@ class TestEndToEndTagCalculation(unittest.TestCase):
 
         # Should be the highest non-RC version
         self.assertEqual(src_tag_latest, '15')  # 15.0.0-rc1 is in major 15
+
+    def test_complete_tag_calculation_4part(self):
+        """Test complete tag calculation with 4-part versions"""
+        # Simulate source tags from a registry with 4-part versions
+        src_tags_raw = [
+            '7.14.10.2', '7.14.10.3', '7.14.10.1',
+            '7.14.11.1-rc1', '7.14.11.1',
+            '7.13.14.0', '7.13.13.5',
+            'invalid-tag',
+        ]
+
+        # Parse and filter
+        src_tags = [run.parse_version(t) for t in src_tags_raw]
+        src_tags = [t for t in src_tags if t]
+
+        # Group tags and calculate latest
+        src_tags_grouped = run.group_versions(src_tags, prefix=run.args.prefix or '', suffix=run.args.suffix or '')
+        src_tags_latest = run.calculate_latest_tags(src_tags_grouped)
+
+        # Verify expected tag mappings
+        expected = {
+            '7': '7.14.11.1',
+            '7.14': '7.14.11.1',
+            '7.13': '7.13.14.0',
+            '7.14.10': '7.14.10.3',
+            '7.14.11': '7.14.11.1',
+            '7.13.13': '7.13.13.5',
+            '7.13.14': '7.13.14.0',
+        }
+
+        self.assertEqual(src_tags_latest, expected)
+
+    def test_complete_tag_calculation_5part(self):
+        """Test complete tag calculation with 5-part versions"""
+        # Simulate source tags from a registry with 5-part versions
+        src_tags_raw = [
+            '2.7.14.10.2', '2.7.14.10.3', '2.7.14.10.1',
+            '2.7.14.11.1-rc1', '2.7.14.11.1',
+            '2.7.13.14.0', '2.7.13.13.5',
+            'invalid-tag',
+        ]
+
+        # Parse and filter
+        src_tags = [run.parse_version(t) for t in src_tags_raw]
+        src_tags = [t for t in src_tags if t]
+
+        # Group tags and calculate latest
+        src_tags_grouped = run.group_versions(src_tags, prefix=run.args.prefix or '', suffix=run.args.suffix or '')
+        src_tags_latest = run.calculate_latest_tags(src_tags_grouped)
+
+        # Verify expected tag mappings
+        expected = {
+            '2': '2.7.14.11.1',
+            '2.7': '2.7.14.11.1',
+            '2.7.14': '2.7.14.11.1',
+            '2.7.13': '2.7.13.14.0',
+            '2.7.14.10': '2.7.14.10.3',
+            '2.7.14.11': '2.7.14.11.1',
+            '2.7.13.13': '2.7.13.13.5',
+            '2.7.13.14': '2.7.13.14.0',
+        }
+
+        self.assertEqual(src_tags_latest, expected)
+
+    def test_complete_tag_calculation_mixed_parts(self):
+        """Test complete tag calculation with mixed 3, 4, and 5 part versions"""
+        src_tags_raw = [
+            '14.10.2',           # 3-part
+            '14.10.2.1',         # 4-part (same patch, different build)
+            '14.10.2.1.5',       # 5-part (same patch+build, different build2)
+            '14.11.1',           # 3-part
+            '14.11.2.0',         # 4-part
+            '13.14.0.0.1',       # 5-part
+        ]
+
+        # Parse and filter
+        src_tags = [run.parse_version(t) for t in src_tags_raw]
+        src_tags = [t for t in src_tags if t]
+
+        # Group tags
+        from collections import defaultdict
+        src_tags_grouped = defaultdict(list)
+        for t in src_tags:
+            major_key = t['major']
+            src_tags_grouped[major_key].append(t)
+
+        for t in src_tags:
+            if t['minor']:
+                minor_key = t['major'] + '.' + t['minor']
+                src_tags_grouped[minor_key].append(t)
+
+        # Calculate latest for each group
+        src_tags_latest = dict(
+            (k, run.str_version(run.max_version(src_tags_grouped[k])))
+            for k in src_tags_grouped.keys()
+        )
+
+        # Verify: 14.11.2.0 should be max for 14.11 (higher patch)
+        # 14.11.2.0 should be max for 14 (highest minor.patch combination)
+        # For 14.10 with same patch, 14.10.2 wins (no build > with build, like major.minor logic)
+        expected = {
+            '14': '14.11.2.0',
+            '13': '13.14.0.0.1',
+            '14.10': '14.10.2',
+            '14.11': '14.11.2.0',
+            '13.14': '13.14.0.0.1',
+        }
+
+        self.assertEqual(src_tags_latest, expected)
 
 
 if __name__ == '__main__':

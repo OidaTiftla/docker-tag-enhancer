@@ -112,13 +112,8 @@ def run_main_logic():
     if args.filter:
         src_tags = [t for t in src_tags if re.search(args.filter, t)]
     src_tags = [parse_version(t) for t in src_tags]
-    src_tags_grouped = defaultdict(list)
-    for t in src_tags:
-        src_tags_grouped[(args.prefix or '') + t['major'] + ('-ce' if t['ce'] else '') + (t['rest'] or '') + (args.suffix or '')].append(t)
-    for t in src_tags:
-        if t['minor']:
-            src_tags_grouped[(args.prefix or '') + t['major'] + '.' + t['minor'] + ('-ce' if t['ce'] else '') + (t['rest'] or '') + (args.suffix or '')].append(t)
-    src_tags_latest = dict((k, str_version(max_version(src_tags_grouped[k]))) for k in src_tags_grouped.keys())
+    src_tags_grouped = group_versions(src_tags, prefix=args.prefix or '', suffix=args.suffix or '')
+    src_tags_latest = calculate_latest_tags(src_tags_grouped)
 
     dest_image = to_full_image_url(args.dest)
     dest_url = parse_image_url(args.dest)
@@ -409,6 +404,72 @@ def max_version(versions):
             latest = v
 
     return latest
+
+
+def group_versions(versions, prefix='', suffix=''):
+    """
+    Group versions by all hierarchical levels (major, major.minor, major.minor.patch, etc.)
+
+    Args:
+        versions: List of parsed version dictionaries
+        prefix: Optional prefix to prepend to group keys
+        suffix: Optional suffix to append to group keys
+
+    Returns:
+        Dictionary mapping version keys to lists of version dictionaries
+    """
+    grouped = defaultdict(list)
+
+    for v in versions:
+        # Build the suffix parts that apply to all levels
+        ce_suffix = '-ce' if v.get('ce') else ''
+        rest_suffix = v.get('rest') or ''
+
+        # Group by major
+        major_key = prefix + v['major'] + ce_suffix + rest_suffix + suffix
+        grouped[major_key].append(v)
+
+        # Group by major.minor (if minor exists)
+        if v['minor']:
+            minor_key = prefix + v['major'] + '.' + v['minor'] + ce_suffix + rest_suffix + suffix
+            grouped[minor_key].append(v)
+
+            # Group by major.minor.patch (if patch exists)
+            if v['patch']:
+                patch_key = prefix + v['major'] + '.' + v['minor'] + '.' + v['patch'] + ce_suffix + rest_suffix + suffix
+                grouped[patch_key].append(v)
+
+                # Group by major.minor.patch.build (if build exists)
+                if v.get('build'):
+                    build_key = prefix + v['major'] + '.' + v['minor'] + '.' + v['patch'] + '.' + v['build'] + ce_suffix + rest_suffix + suffix
+                    grouped[build_key].append(v)
+
+                    # Group by major.minor.patch.build.build2 (if build2 exists)
+                    if v.get('build2'):
+                        build2_key = prefix + v['major'] + '.' + v['minor'] + '.' + v['patch'] + '.' + v['build'] + '.' + v['build2'] + ce_suffix + rest_suffix + suffix
+                        grouped[build2_key].append(v)
+
+    return dict(grouped)
+
+
+def calculate_latest_tags(grouped_versions):
+    """
+    Calculate the latest version for each group.
+
+    Args:
+        grouped_versions: Dictionary mapping version keys to lists of version dictionaries
+                         (output from group_versions)
+
+    Returns:
+        Dictionary mapping version keys to latest version strings
+        (excludes mappings where key equals value)
+    """
+    result = {}
+    for k, versions in grouped_versions.items():
+        latest = str_version(max_version(versions))
+        if k != latest:
+            result[k] = latest
+    return result
 
 
 token_cache = {}

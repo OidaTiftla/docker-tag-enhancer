@@ -7,7 +7,6 @@ These tests simulate the complete workflow without accessing real registries.
 
 import unittest
 from unittest.mock import patch
-from collections import defaultdict
 
 import run
 
@@ -77,20 +76,9 @@ class TestIntegrationWithMockedRegistry(unittest.TestCase):
         # Parse tags as the main script would
         src_tags = [t for t in [run.parse_version(t) for t in self.mock_src_tags] if t]
 
-        # Group and calculate (lines 433-439 from run.py)
-        src_tags_grouped = defaultdict(list)
-        for t in src_tags:
-            major_key = t['major']
-            src_tags_grouped[major_key].append(t)
-
-            if t['minor']:
-                minor_key = t['major'] + '.' + t['minor']
-                src_tags_grouped[minor_key].append(t)
-
-        src_tags_latest = dict(
-            (k, run.str_version(run.max_version(src_tags_grouped[k])))
-            for k in src_tags_grouped.keys()
-        )
+        # Group and calculate using extracted functions
+        src_tags_grouped = run.group_versions(src_tags)
+        src_tags_latest = run.calculate_latest_tags(src_tags_grouped)
 
         # Verify calculated tags
         expected_tags = {
@@ -128,19 +116,8 @@ class TestIntegrationWithMockedRegistry(unittest.TestCase):
         dest_tags = self.mock_dest_tags
 
         # Calculate which tags need to be copied
-        src_tags_grouped = defaultdict(list)
-        for t in src_tags:
-            major_key = t['major']
-            src_tags_grouped[major_key].append(t)
-
-            if t['minor']:
-                minor_key = t['major'] + '.' + t['minor']
-                src_tags_grouped[minor_key].append(t)
-
-        src_tags_latest = dict(
-            (k, run.str_version(run.max_version(src_tags_grouped[k])))
-            for k in src_tags_grouped.keys()
-        )
+        src_tags_grouped = run.group_versions(src_tags)
+        src_tags_latest = run.calculate_latest_tags(src_tags_grouped)
 
         # Filter out tags that already exist in dest
         new_tags = {k: v for k, v in src_tags_latest.items() if k not in dest_tags}
@@ -398,17 +375,8 @@ class TestCompleteWorkflow(unittest.TestCase):
 
         # Manually replicate the workflow
         parsed_src = [t for t in [run.parse_version(t) for t in src_tags] if t]
-
-        src_tags_grouped = defaultdict(list)
-        for t in parsed_src:
-            src_tags_grouped[t['major']].append(t)
-            if t['minor']:
-                src_tags_grouped[t['major'] + '.' + t['minor']].append(t)
-
-        src_tags_latest = dict(
-            (k, run.str_version(run.max_version(src_tags_grouped[k])))
-            for k in src_tags_grouped.keys()
-        )
+        src_tags_grouped = run.group_versions(parsed_src)
+        src_tags_latest = run.calculate_latest_tags(src_tags_grouped)
 
         # Expected tags to be created
         expected = {
@@ -423,6 +391,122 @@ class TestCompleteWorkflow(unittest.TestCase):
 
         # Verify that in dry-run, no actual copies are made
         # (execWithRetry shouldn't be called)
+        self.assertEqual(mock_exec_retry.call_count, 0)
+
+        # Clean up
+        run.args = original_args
+
+    @patch('run.execAndParseJsonWithRetryRateLimit')
+    @patch('run.execWithRetry')
+    def test_complete_workflow_4part_versions(self, mock_exec_retry, mock_exec_json):
+        """Test complete workflow with 4-part versions"""
+
+        # Set up args
+        original_args = run.args
+        run.args = MockArgs()
+        run.args.dry_run = True
+
+        # Mock tag lists with 4-part versions
+        src_tags = ['7.14.10.2', '7.14.10.3', '7.14.11.1', '7.13.14.0']
+        dest_tags = []
+
+        mock_exec_json.return_value = {'Tags': src_tags}
+
+        # Manually replicate the workflow using group_versions
+        parsed_src = [t for t in [run.parse_version(t) for t in src_tags] if t]
+        grouped = run.group_versions(parsed_src)
+        src_tags_latest = run.calculate_latest_tags(grouped)
+
+        # Expected tags for 4-part versions
+        expected = {
+            '7': '7.14.11.1',
+            '7.14': '7.14.11.1',
+            '7.13': '7.13.14.0',
+            '7.14.10': '7.14.10.3',
+            '7.14.11': '7.14.11.1',
+            '7.13.14': '7.13.14.0',
+        }
+
+        self.assertEqual(src_tags_latest, expected)
+
+        # Verify that in dry-run, no actual copies are made
+        self.assertEqual(mock_exec_retry.call_count, 0)
+
+        # Clean up
+        run.args = original_args
+
+    @patch('run.execAndParseJsonWithRetryRateLimit')
+    @patch('run.execWithRetry')
+    def test_complete_workflow_5part_versions(self, mock_exec_retry, mock_exec_json):
+        """Test complete workflow with 5-part versions"""
+
+        # Set up args
+        original_args = run.args
+        run.args = MockArgs()
+        run.args.dry_run = True
+
+        # Mock tag lists with 5-part versions
+        src_tags = ['2.7.14.10.2', '2.7.14.10.3', '2.7.14.11.1', '2.7.13.14.0']
+        dest_tags = []
+
+        mock_exec_json.return_value = {'Tags': src_tags}
+
+        # Manually replicate the workflow using group_versions
+        parsed_src = [t for t in [run.parse_version(t) for t in src_tags] if t]
+        grouped = run.group_versions(parsed_src)
+        src_tags_latest = run.calculate_latest_tags(grouped)
+
+        # Expected tags for 5-part versions
+        expected = {
+            '2': '2.7.14.11.1',
+            '2.7': '2.7.14.11.1',
+            '2.7.14': '2.7.14.11.1',
+            '2.7.13': '2.7.13.14.0',
+            '2.7.14.10': '2.7.14.10.3',
+            '2.7.14.11': '2.7.14.11.1',
+            '2.7.13.14': '2.7.13.14.0',
+        }
+
+        self.assertEqual(src_tags_latest, expected)
+
+        # Verify that in dry-run, no actual copies are made
+        self.assertEqual(mock_exec_retry.call_count, 0)
+
+        # Clean up
+        run.args = original_args
+
+    @patch('run.execAndParseJsonWithRetryRateLimit')
+    @patch('run.execWithRetry')
+    def test_complete_workflow_mixed_parts(self, mock_exec_retry, mock_exec_json):
+        """Test complete workflow with mixed 3, 4, and 5-part versions"""
+
+        # Set up args
+        original_args = run.args
+        run.args = MockArgs()
+        run.args.dry_run = True
+
+        # Mock tag lists with mixed version parts
+        src_tags = ['14.10.2', '14.10.2.1', '14.10.2.1.5', '14.11.1', '14.11.1.0']
+        dest_tags = []
+
+        mock_exec_json.return_value = {'Tags': src_tags}
+
+        # Manually replicate the workflow using group_versions
+        parsed_src = [t for t in [run.parse_version(t) for t in src_tags] if t]
+        grouped = run.group_versions(parsed_src)
+        src_tags_latest = run.calculate_latest_tags(grouped)
+
+        # Expected tags for mixed versions
+        # Remember: 3-part > 4-part > 5-part when base is the same (less specific is "greater")
+        expected = {
+            '14': '14.11.1',
+            '14.10': '14.10.2',  # 3-part is "greater" than 4-part and 5-part
+            '14.11': '14.11.1',  # 3-part is "greater" than 4-part
+        }
+
+        self.assertEqual(src_tags_latest, expected)
+
+        # Verify that in dry-run, no actual copies are made
         self.assertEqual(mock_exec_retry.call_count, 0)
 
         # Clean up
