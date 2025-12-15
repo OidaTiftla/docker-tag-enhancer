@@ -4,9 +4,11 @@
 	"name": "Python 3",
 	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
 	"image": "mcr.microsoft.com/devcontainers/python:2-3.12-bookworm",
+	"remoteUser": "ubuntu",
 
 	// Features to add to the dev container. More info: https://containers.dev/features.
 	"features": {
+		"ghcr.io/devcontainers/features/nix:1": {},
 		"ghcr.io/jsburckhardt/devcontainer-features/skopeo:1": {}
 	},
 
@@ -26,6 +28,9 @@
 				"Asuka.insertnumbers",
 				"heaths.vscode-guid",
 				"shardulm94.trailing-spaces",
+				"EditorConfig.EditorConfig",
+				"streetsidesoftware.code-spell-checker",
+				"streetsidesoftware.code-spell-checker-german",
 				"AmirHA.better-comments-2",
 				"chrmarti.regex"
 			]
