@@ -34,6 +34,7 @@ parser.add_argument('-r', '--registry', type=str, help='The registry to login (d
 parser.add_argument('--dry-run', action='store_true', help='Do not perform any changes, just print what would be done.')
 parser.add_argument('--only-use-skopeo', action='store_true', help='Only use skopeo for the operations, do not use the Docker registry REST-API. (Might be slower.)')
 parser.add_argument('--inverse-specificity-order', action='store_true', help='Inverse the version specificity comparison: more specific versions (e.g., 1.2.3.4.5) are treated as greater than less specific ones (e.g., 1.2.3).')
+parser.add_argument('-v', '--verbose', action='count', default=0, help='Increase verbosity level (can be specified up to 3 times: -v for source tags, -vv to also show dest tags, -vvv for detailed debugging).')
 
 def parse_arguments():
     return parser.parse_args()
@@ -112,9 +113,25 @@ def run_main_logic():
     src_tags = [t for t in src_tags if parse_version(t)]
     if args.filter:
         src_tags = [t for t in src_tags if re.search(args.filter, t)]
+
+    if args.verbose >= 1:
+        print('>>> Source tags found (' + str(len(src_tags)) + '):')
+        for tag in sorted(src_tags):
+            print('  - ' + tag)
+
     src_tags = [parse_version(t) for t in src_tags]
     src_tags_grouped = group_versions(src_tags, prefix=args.prefix or '', suffix=args.suffix or '')
+
+    if args.verbose >= 3:
+        print('[DEBUG] Version grouping (' + str(len(src_tags_grouped)) + ' groups):')
+        for key, versions in sorted(src_tags_grouped.items()):
+            version_strs = [str_version(v) for v in versions]
+            print('  - ' + key + ' <- [' + ', '.join(version_strs) + ']')
+
     src_tags_latest = calculate_latest_tags(src_tags_grouped)
+
+    if args.verbose >= 3:
+        print('[DEBUG] Latest tags calculated (' + str(len(src_tags_latest)) + ' mappings):')
 
     dest_image = to_full_image_url(args.dest)
     dest_url = parse_image_url(args.dest)
@@ -136,6 +153,11 @@ def run_main_logic():
         dest_tags = request_docker_registry(dest_api, dest_name, 'tags/list')['tags']
     # dest_tags = ['14.10.2', '14.10.3', '14.10', '14.11.1', '13.14.0', '13']
     dest_tags = [t for t in dest_tags if parse_version(t)]
+
+    if args.verbose >= 2:
+        print('>>> Destination tags found (' + str(len(dest_tags)) + '):')
+        for tag in sorted(dest_tags):
+            print('  - ' + tag)
 
     src_tags_sorted = [t for t in src_tags]
     src_tags_sorted.sort(key=cmp_to_key(lambda x, y: compare_version(prepare_for_sort(x), prepare_for_sort(y))))
@@ -196,6 +218,8 @@ def withRetryRateLimit(func):
                 exit_code, std_out, std_err = err.args
                 if 'toomanyrequests' in std_err:
                     print('>>> Rate limit reached, retrying in 15min:', std_out, std_err, 'Exit code:', exit_code)
+                    if args and args.verbose >= 3:
+                        print('[DEBUG] Rate limit error details:', err)
                     sleep(900)
                     continue
             raise
@@ -209,6 +233,10 @@ def withRetry(func):
             raise
         except BaseException as err:
             print('>>> Failed, retrying in 5min:', err)
+            if args and args.verbose >= 3:
+                import traceback
+                print('[DEBUG] Full error traceback:')
+                traceback.print_exc()
             sleep(300)
 
 
@@ -475,8 +503,12 @@ def set_registry_token(api, name, token):
     cache_key = api + '+' + name
     if not token:
         if cache_key in token_cache:
+            if args and args.verbose >= 3:
+                print('[DEBUG] Removing cached token for', cache_key)
             del token_cache[cache_key]
     else:
+        if args and args.verbose >= 3:
+            print('[DEBUG] Setting token for', cache_key)
         token_cache[cache_key] = 'Bearer ' + token
 
 
@@ -485,6 +517,9 @@ def retrieve_new_token(api, name, wwwAuthenticateHeader):
         raise Exception('Cannot retrieve new token, --only-use-skopeo is set. This might be a situation that has not been implemented yet.')
 
     cache_key = api + '+' + name
+
+    if args.verbose >= 3:
+        print('[DEBUG] Retrieving new token for', cache_key)
 
     # https://docs.docker.com/registry/spec/auth/token/
     parsed = www_authenticate.parse(wwwAuthenticateHeader)
@@ -495,6 +530,11 @@ def retrieve_new_token(api, name, wwwAuthenticateHeader):
     url = parsed.pop('realm')
     params = parsed
     auth = get_auth_from_config(api)
+
+    if args.verbose >= 3:
+        print('[DEBUG] Token request URL:', url)
+        print('[DEBUG] Token request params:', params)
+
     r = requests.get(url, params=params, auth=auth)
     r.raise_for_status()
     o = r.json()
@@ -503,6 +543,10 @@ def retrieve_new_token(api, name, wwwAuthenticateHeader):
         raise Exception('No token found in response: ' + str(o))
     token = authType + ' ' + t
     token_cache[cache_key] = token
+
+    if args.verbose >= 3:
+        print('[DEBUG] Token retrieved successfully for', cache_key)
+
     return token
 
 
@@ -613,13 +657,22 @@ def mirror_image_tag(tag, dest_tag=None):
     #     exec('skopeo' + opts + ' copy ' + src_image_tag + ' ' + dest_image_tag)
     #     exit(-1)
 
+    if args.verbose >= 3:
+        print('[DEBUG] Checking digests for', src_image_tag, '->', dest_image_tag)
+
     if args.only_use_skopeo:
         src_digest = execAndParseJsonWithRetryRateLimit('skopeo inspect --no-tags ' + src_skopeo_auth_args + ' ' + src_image_tag)['Digest']
+        if args.verbose >= 3:
+            print('[DEBUG] Source digest:', src_digest)
         try:
             dest_digest = execAndParseJsonWithRetryRateLimit('skopeo inspect --no-tags ' + dest_skopeo_auth_args + ' ' + dest_image_tag)['Digest']
+            if args.verbose >= 3:
+                print('[DEBUG] Destination digest:', dest_digest)
         except Exception as err:
             if 'manifest unknown' in str(err):
                 dest_digest = None
+                if args.verbose >= 3:
+                    print('[DEBUG] Destination tag does not exist')
             else:
                 raise err
     else:
@@ -633,10 +686,16 @@ def mirror_image_tag(tag, dest_tag=None):
                     src_digest = src_manifests['config']['digest']
                 elif src_manifests.get('manifests'):
                     src_digest = [x.get('digest') for x in src_manifests['manifests']]
+            if args.verbose >= 3:
+                print('[DEBUG] Source digest (REST API):', src_digest)
         except requests.exceptions.HTTPError as err:
             if err.response.status_code == 404:
+                if args.verbose >= 3:
+                    print('[DEBUG] Docker manifest not found, trying OCI manifest')
                 src_manifests = request_docker_registry(src_api, src_name, 'manifests/' + src_tag, headers={'Accept': 'application/vnd.oci.image.index.v1+json'})
                 src_digest = [x['digest'] for x in src_manifests['manifests']]
+                if args.verbose >= 3:
+                    print('[DEBUG] Source digest (OCI):', src_digest)
             else:
                 raise err
 
@@ -650,10 +709,16 @@ def mirror_image_tag(tag, dest_tag=None):
                     dest_digest = dest_manifests['config']['digest']
                 elif dest_manifests.get('manifests'):
                     dest_digest = [x.get('digest') for x in dest_manifests['manifests']]
+            if args.verbose >= 3:
+                print('[DEBUG] Destination digest (REST API):', dest_digest)
         except requests.exceptions.HTTPError as err:
             if err.response.status_code == 404:
+                if args.verbose >= 3:
+                    print('[DEBUG] Docker manifest not found, trying OCI manifest')
                 dest_manifests = request_docker_registry(dest_api, dest_name, 'manifests/' + dest_tag, headers={'Accept': 'application/vnd.oci.image.index.v1+json'})
                 dest_digest = [x['digest'] for x in dest_manifests['manifests']]
+                if args.verbose >= 3:
+                    print('[DEBUG] Destination digest (OCI):', dest_digest)
             else:
                 raise err
 

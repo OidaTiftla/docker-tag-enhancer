@@ -113,6 +113,10 @@ Key flags:
 - `--dry-run`: Print operations without executing
 - `--only-use-skopeo`: Force using skopeo CLI instead of REST API
 - `--inverse-specificity-order`: Inverse the version specificity comparison: more specific versions (e.g., 1.2.3.4.5) are treated as greater than less specific ones (e.g., 1.2.3)
+- `-v/--verbose`: Increase verbosity (can be specified up to 3 times)
+  - `-v`: Show all source tags found
+  - `-vv`: Also show all destination tags found
+  - `-vvv`: Show detailed debugging information (token operations, digest comparisons, version grouping, retry details)
 
 Authentication:
 - `--registry-token`: Bearer token for both source and dest

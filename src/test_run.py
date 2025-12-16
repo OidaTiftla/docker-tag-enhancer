@@ -25,6 +25,7 @@ class MockArgs:
         self.registry_token = None
         self.login = False
         self.inverse_specificity_order = False
+        self.verbose = 0
 
 
 class TestVersionParsing(unittest.TestCase):
