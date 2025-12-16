@@ -28,6 +28,7 @@ class MockArgs:
         self.dest_registry_token = None
         self.registry_token = None
         self.login = False
+        self.inverse_specificity_order = False
 
 
 class TestIntegrationWithMockedRegistry(unittest.TestCase):
@@ -541,6 +542,194 @@ class TestCompleteWorkflow(unittest.TestCase):
         self.assertEqual(v['rc'], '4')
         self.assertEqual(v['ce'], '5')
         self.assertEqual(v['rest'], '-alpine')
+
+        # Clean up
+        run.args = original_args
+
+
+class TestInverseSpecificityOrderIntegration(unittest.TestCase):
+    """Integration tests for inverse specificity order flag"""
+
+    @patch('run.execAndParseJsonWithRetryRateLimit')
+    @patch('run.execWithRetry')
+    def test_inverse_order_mixed_parts(self, mock_exec_retry, mock_exec_json):
+        """Test complete workflow with inverse specificity order and mixed parts"""
+
+        # Set up args
+        original_args = run.args
+        run.args = MockArgs()
+        run.args.dry_run = True
+        run.args.inverse_specificity_order = True
+
+        # Mock tag lists with mixed version parts
+        # Same tags as test_complete_workflow_mixed_parts but with inverse order
+        src_tags = ['14.10.2', '14.10.2.1', '14.10.2.1.5', '14.11.1', '14.11.1.0']
+        dest_tags = []
+
+        mock_exec_json.return_value = {'Tags': src_tags}
+
+        # Manually replicate the workflow using group_versions
+        parsed_src = [t for t in [run.parse_version(t) for t in src_tags] if t]
+        grouped = run.group_versions(parsed_src)
+        src_tags_latest = run.calculate_latest_tags(grouped)
+
+        # Expected tags for mixed versions with inverse order
+        # With inverse: 5-part > 4-part > 3-part when base is the same (more specific is "greater")
+        expected = {
+            '14': '14.11.1.0',  # 4-part is "greater" than 3-part
+            '14.11': '14.11.1.0',  # 4-part is "greater" than 3-part
+            '14.11.1': '14.11.1.0',  # 4-part is "greater" than 3-part
+            '14.10': '14.10.2.1.5',  # 5-part is "greater" than 4-part and 3-part
+            '14.10.2': '14.10.2.1.5',  # 5-part is "greater" than 4-part
+            '14.10.2.1': '14.10.2.1.5',  # 5-part is the only one at this level
+        }
+
+        self.assertEqual(src_tags_latest, expected)
+
+        # Verify that in dry-run, no actual copies are made
+        self.assertEqual(mock_exec_retry.call_count, 0)
+
+        # Clean up
+        run.args = original_args
+
+    @patch('run.execAndParseJsonWithRetryRateLimit')
+    @patch('run.execWithRetry')
+    def test_inverse_order_simple_versions(self, mock_exec_retry, mock_exec_json):
+        """Test inverse order with simple 3-part versions"""
+
+        # Set up args
+        original_args = run.args
+        run.args = MockArgs()
+        run.args.dry_run = True
+        run.args.inverse_specificity_order = True
+
+        # Mock tag lists with standard 3-part versions
+        src_tags = ['14.10.2', '14.10.3', '14.11.1', '13.14.0']
+        dest_tags = []
+
+        mock_exec_json.return_value = {'Tags': src_tags}
+
+        # Parse tags
+        parsed_src = [t for t in [run.parse_version(t) for t in src_tags] if t]
+        grouped = run.group_versions(parsed_src)
+        src_tags_latest = run.calculate_latest_tags(grouped)
+
+        # Expected tags - same as normal order since all versions have same number of parts
+        expected = {
+            '14': '14.11.1',
+            '14.11': '14.11.1',
+            '14.10': '14.10.3',
+            '13': '13.14.0',
+            '13.14': '13.14.0',
+        }
+
+        self.assertEqual(src_tags_latest, expected)
+
+        # Clean up
+        run.args = original_args
+
+    @patch('run.execAndParseJsonWithRetryRateLimit')
+    @patch('run.execWithRetry')
+    def test_inverse_order_4part_versions(self, mock_exec_retry, mock_exec_json):
+        """Test inverse order with 4-part versions"""
+
+        # Set up args
+        original_args = run.args
+        run.args = MockArgs()
+        run.args.dry_run = True
+        run.args.inverse_specificity_order = True
+
+        # Mock tag lists with 4-part versions
+        src_tags = ['7.14.10.2', '7.14.10.3', '7.14.11.1', '7.13.14.0']
+        dest_tags = []
+
+        mock_exec_json.return_value = {'Tags': src_tags}
+
+        # Parse and group
+        parsed_src = [t for t in [run.parse_version(t) for t in src_tags] if t]
+        grouped = run.group_versions(parsed_src)
+        src_tags_latest = run.calculate_latest_tags(grouped)
+
+        # Expected tags - same as normal since all have same parts
+        expected = {
+            '7': '7.14.11.1',
+            '7.14': '7.14.11.1',
+            '7.14.11': '7.14.11.1',
+            '7.14.10': '7.14.10.3',
+            '7.13': '7.13.14.0',
+            '7.13.14': '7.13.14.0',
+        }
+
+        self.assertEqual(src_tags_latest, expected)
+
+        # Clean up
+        run.args = original_args
+
+    @patch('run.execAndParseJsonWithRetryRateLimit')
+    @patch('run.execWithRetry')
+    def test_inverse_order_three_four_five_parts(self, mock_exec_retry, mock_exec_json):
+        """Test inverse order with 3, 4, and 5-part versions at same base"""
+
+        # Set up args
+        original_args = run.args
+        run.args = MockArgs()
+        run.args.dry_run = True
+        run.args.inverse_specificity_order = True
+
+        # Mock tags with 3, 4, and 5-part versions with same base
+        src_tags = ['1.2.3', '1.2.3.4', '1.2.3.4.5', '2.0.0', '2.0.0.1']
+        dest_tags = []
+
+        mock_exec_json.return_value = {'Tags': src_tags}
+
+        # Parse and group
+        parsed_src = [t for t in [run.parse_version(t) for t in src_tags] if t]
+        grouped = run.group_versions(parsed_src)
+        src_tags_latest = run.calculate_latest_tags(grouped)
+
+        # Expected tags with inverse order
+        # With inverse: more specific versions are "greater"
+        expected = {
+            '2': '2.0.0.1',    # 4-part is greatest
+            '2.0': '2.0.0.1',    # 4-part is greatest
+            '2.0.0': '2.0.0.1',    # 4-part is greatest
+            '1': '1.2.3.4.5',  # 5-part is greatest
+            '1.2': '1.2.3.4.5',  # 5-part is greatest
+            '1.2.3': '1.2.3.4.5',  # 5-part is greatest
+            '1.2.3.4': '1.2.3.4.5',  # 5-part is the only one at this level
+        }
+
+        self.assertEqual(src_tags_latest, expected)
+
+        # Clean up
+        run.args = original_args
+
+    def test_inverse_order_version_sorting(self):
+        """Test that version sorting respects inverse specificity order"""
+
+        # Set up args
+        original_args = run.args
+        run.args = MockArgs()
+        run.args.inverse_specificity_order = True
+
+        # Parse versions with different specificity
+        v3 = run.parse_version('14.10.2')
+        v4 = run.parse_version('14.10.2.0')
+        v5 = run.parse_version('14.10.2.0.0')
+
+        from functools import cmp_to_key
+
+        versions = [v3, v4, v5]
+        sorted_versions = sorted(versions, key=cmp_to_key(run.compare_version))
+
+        # With inverse order: 3-part < 4-part < 5-part (ascending order)
+        self.assertEqual(run.str_version(sorted_versions[0]), '14.10.2')
+        self.assertEqual(run.str_version(sorted_versions[1]), '14.10.2.0')
+        self.assertEqual(run.str_version(sorted_versions[2]), '14.10.2.0.0')
+
+        # The last element (greatest) should be the 5-part version
+        sorted_desc = sorted(versions, key=cmp_to_key(run.compare_version), reverse=True)
+        self.assertEqual(run.str_version(sorted_desc[0]), '14.10.2.0.0')
 
         # Clean up
         run.args = original_args

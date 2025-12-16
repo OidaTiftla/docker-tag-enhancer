@@ -112,6 +112,7 @@ Key flags:
 - `--no-copy`: Dry-run calculation without copying
 - `--dry-run`: Print operations without executing
 - `--only-use-skopeo`: Force using skopeo CLI instead of REST API
+- `--inverse-specificity-order`: Inverse the version specificity comparison: more specific versions (e.g., 1.2.3.4.5) are treated as greater than less specific ones (e.g., 1.2.3)
 
 Authentication:
 - `--registry-token`: Bearer token for both source and dest

@@ -33,6 +33,7 @@ parser.add_argument('--dest-registry-token', type=str, help='Bearer token for ac
 parser.add_argument('-r', '--registry', type=str, help='The registry to login (defaults to docker.io).')
 parser.add_argument('--dry-run', action='store_true', help='Do not perform any changes, just print what would be done.')
 parser.add_argument('--only-use-skopeo', action='store_true', help='Only use skopeo for the operations, do not use the Docker registry REST-API. (Might be slower.)')
+parser.add_argument('--inverse-specificity-order', action='store_true', help='Inverse the version specificity comparison: more specific versions (e.g., 1.2.3.4.5) are treated as greater than less specific ones (e.g., 1.2.3).')
 
 def parse_arguments():
     return parser.parse_args()
@@ -360,11 +361,15 @@ def compare_version(v1, v2):
             elif p1_int > p2_int:
                 return 1
         elif has_p1 and not has_p2:
-            # v1 has more parts - less specific version is greater
-            return -1
+            # v1 has more parts
+            # Default behavior: less specific version is greater (v1 < v2, return -1)
+            # Inverse behavior: more specific version is greater (v1 > v2, return 1)
+            return 1 if args.inverse_specificity_order else -1
         elif not has_p1 and has_p2:
-            # v2 has more parts - less specific version is greater
-            return 1
+            # v2 has more parts
+            # Default behavior: less specific version is greater (v1 > v2, return 1)
+            # Inverse behavior: more specific version is greater (v1 < v2, return -1)
+            return -1 if args.inverse_specificity_order else 1
 
     # Compare rc versions
     if v1['rc'] and v2['rc']:
