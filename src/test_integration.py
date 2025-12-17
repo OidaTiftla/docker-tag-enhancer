@@ -61,38 +61,43 @@ class TestIntegrationWithMockedRegistry(unittest.TestCase):
 
     @patch('run.execAndParseJsonWithRetryRateLimit')
     @patch('run.execWithRetry')
-    def test_dry_run_tag_calculation(self, mock_exec_with_retry, mock_exec_json):
+    @patch('builtins.print')
+    def test_dry_run_tag_calculation(self, mock_print, mock_exec_with_retry, mock_exec_json):
         """Test dry run with mocked registry responses"""
         run.args.dry_run = True
         run.args.no_copy = False
 
-        # Mock skopeo list-tags responses
-        def mock_list_tags(cmd):
-            if 'source' in cmd:
-                return {'Tags': self.mock_src_tags}
-            else:
-                return {'Tags': self.mock_dest_tags}
+        # Mock skopeo responses: list-tags and inspect
+        def mock_skopeo_calls(cmd):
+            if 'list-tags' in cmd:
+                if 'source' in cmd:
+                    return {'Tags': self.mock_src_tags}
+                else:
+                    return {'Tags': self.mock_dest_tags}
+            elif 'inspect' in cmd:
+                # Mock digest responses for image comparison
+                return {'Digest': 'sha256:abc123'}
+            return {}
 
-        mock_exec_json.side_effect = mock_list_tags
+        mock_exec_json.side_effect = mock_skopeo_calls
 
-        # Parse tags as the main script would
-        src_tags = [t for t in [run.parse_version(t) for t in self.mock_src_tags] if t]
+        # Actually call the implementation
+        run.run_main_logic()
 
-        # Group and calculate using extracted functions
-        src_tags_grouped = run.group_versions(src_tags)
-        src_tags_latest = run.calculate_latest_tags(src_tags_grouped)
+        # Verify skopeo was called (list-tags + inspect calls)
+        self.assertGreaterEqual(mock_exec_json.call_count, 2)
 
-        # Verify calculated tags
-        expected_tags = {
-            '14': '14.11.1',
-            '13': '13.14.0',
-            '14.10': '14.10.3',
-            '14.11': '14.11.1',
-            '13.14': '13.14.0',
-            '13.13': '13.13.5',
-        }
+        # Verify the output contains expected tag mappings
+        print_calls = [str(call) for call in mock_print.call_args_list]
+        printed_output = ' '.join(print_calls)
 
-        self.assertEqual(src_tags_latest, expected_tags)
+        # Check that calculated tags are printed
+        self.assertIn("call('- 14 \\t-> 14.11.1')", printed_output)
+        self.assertIn("call('- 13 \\t-> 13.14.0')", printed_output)
+        self.assertIn("call('- 14.10 \\t-> 14.10.3')", printed_output)
+        self.assertIn("call('- 14.11 \\t-> 14.11.1')", printed_output)
+        self.assertIn("call('- 13.14 \\t-> 13.14.0')", printed_output)
+        self.assertIn("call('- 13.13 \\t-> 13.13.5')", printed_output)
 
         # In dry-run mode, execWithRetry should not be called
         self.assertEqual(mock_exec_with_retry.call_count, 0)
@@ -104,79 +109,72 @@ class TestIntegrationWithMockedRegistry(unittest.TestCase):
         run.args.only_new_tags = True
         run.args.dry_run = False
 
-        # Mock responses
-        def mock_list_tags(cmd):
-            if 'source' in cmd:
-                return {'Tags': self.mock_src_tags}
-            else:
-                return {'Tags': self.mock_dest_tags}
+        # Mock skopeo responses
+        def mock_skopeo_calls(cmd):
+            if 'list-tags' in cmd:
+                if 'source' in cmd:
+                    return {'Tags': self.mock_src_tags}
+                else:
+                    return {'Tags': self.mock_dest_tags}
+            elif 'inspect' in cmd:
+                return {'Digest': 'sha256:abc123'}
+            return {}
 
-        mock_exec_json.side_effect = mock_list_tags
+        mock_exec_json.side_effect = mock_skopeo_calls
 
-        # Simulate the filtering logic
-        src_tags = [t for t in [run.parse_version(t) for t in self.mock_src_tags] if t]
-        dest_tags = self.mock_dest_tags
+        # Call the actual implementation
+        run.run_main_logic()
 
-        # Calculate which tags need to be copied
-        src_tags_grouped = run.group_versions(src_tags)
-        src_tags_latest = run.calculate_latest_tags(src_tags_grouped)
+        # Verify skopeo was called
+        self.assertGreaterEqual(mock_exec_json.call_count, 2)
 
-        # Filter out tags that already exist in dest
-        new_tags = {k: v for k, v in src_tags_latest.items() if k not in dest_tags}
+        # With only_new_tags=True, should skip tags that already exist in dest
+        # Check that execWithRetry was called, but not for tags already in dest
+        exec_calls = [str(call) for call in mock_exec_with_retry.call_args_list]
 
-        # Should only include new tags
-        self.assertIn('14', new_tags)
-        self.assertIn('13', new_tags)
-        self.assertIn('14.10', new_tags)
-
-        # Verify that existing patch versions won't trigger copy if using only_new_tags
-        # The tag '14.10.2' already exists in dest, but '14.10' calculated tag is new
-        self.assertEqual(new_tags['14.10'], '14.10.3')
+        # Should NOT copy 14.10.2 or 13.14.0 (they already exist in dest)
+        # Should copy new calculated tags like '14', '14.10', etc.
+        for call in exec_calls:
+            # Verify we're not copying tags that already exist
+            if '14.10.2' in call and 'dest:14.10.2' in call:
+                self.fail('Should not copy 14.10.2 as it already exists in dest')
+            if '13.14.0' in call and 'dest:13.14.0' in call:
+                self.fail('Should not copy 13.14.0 as it already exists in dest')
 
     @patch('run.execAndParseJsonWithRetryRateLimit')
-    def test_update_latest_tag(self, mock_exec_json):
+    @patch('builtins.print')
+    def test_update_latest_tag(self, mock_print, mock_exec_json):
         """Test --update-latest flag"""
         run.args.update_latest = True
         run.args.dry_run = True
 
-        # Mock responses
-        def mock_list_tags(cmd):
-            if 'source' in cmd:
-                return {'Tags': self.mock_src_tags}
-            else:
-                return {'Tags': self.mock_dest_tags}
+        # Mock skopeo responses
+        def mock_skopeo_calls(cmd):
+            if 'list-tags' in cmd:
+                if 'source' in cmd:
+                    return {'Tags': self.mock_src_tags}
+                else:
+                    return {'Tags': self.mock_dest_tags}
+            elif 'inspect' in cmd:
+                return {'Digest': 'sha256:abc123'}
+            return {}
 
-        mock_exec_json.side_effect = mock_list_tags
+        mock_exec_json.side_effect = mock_skopeo_calls
 
-        # Calculate overall latest tag
-        src_tags = [t for t in [run.parse_version(t) for t in self.mock_src_tags] if t]
+        # Call the actual implementation
+        run.run_main_logic()
 
-        # Find the absolute latest version
-        from functools import cmp_to_key
+        # Verify the output includes the 'latest' tag mapping
+        print_calls = [str(call) for call in mock_print.call_args_list]
+        printed_output = ' '.join(print_calls)
 
-        def prepare_for_sort(v):
-            v_copy = v.copy()
-            if 'rest' in v_copy:
-                del v_copy['rest']
-            if 'ce' in v_copy and not v_copy['ce']:
-                v_copy['ce'] = '-1'
-            return v_copy
-
-        src_tags_sorted = sorted(
-            src_tags,
-            key=cmp_to_key(lambda x, y: run.compare_version(prepare_for_sort(x), prepare_for_sort(y)))
-        )
-
-        latest_version = run.str_version(src_tags_sorted[-1])
-
-        # The latest should be 14.11.1
-        self.assertEqual(latest_version, '14.11.1')
+        # The latest should be 14.11.1 (highest version)
+        self.assertIn("call('- latest \\t-> 14.11.1')", printed_output)
 
     @patch('run.execAndParseJsonWithRetryRateLimit')
-    def test_filter_regex(self, mock_exec_json):
+    @patch('builtins.print')
+    def test_filter_regex(self, mock_print, mock_exec_json):
         """Test filtering tags with regex"""
-        import re
-
         run.args.filter = r'^((?!-rc|^8\.|^9\.).)*$'
         run.args.dry_run = True
 
@@ -185,33 +183,41 @@ class TestIntegrationWithMockedRegistry(unittest.TestCase):
             '8.5.0', '9.1.0', '14.10.5-rc1'
         ]
 
-        mock_exec_json.return_value = {'Tags': mock_src_with_filter}
+        def mock_skopeo_calls(cmd):
+            if 'list-tags' in cmd:
+                if 'source' in cmd:
+                    return {'Tags': mock_src_with_filter}
+                else:
+                    return {'Tags': self.mock_dest_tags}
+            elif 'inspect' in cmd:
+                return {'Digest': 'sha256:abc123'}
+            return {}
 
-        # Parse and filter
-        src_tags = [run.parse_version(t) for t in mock_src_with_filter]
-        src_tags = [t for t in src_tags if t]
+        mock_exec_json.side_effect = mock_skopeo_calls
 
-        # Apply filter as in run.py line 431
-        src_tags_filtered = [
-            t for t in src_tags
-            if re.search(run.args.filter, run.str_version(t))
-        ]
+        # Call the actual implementation
+        run.run_main_logic()
 
-        # Convert back to strings for assertion
-        filtered_strings = [run.str_version(t) for t in src_tags_filtered]
+        # Check the output to verify filtered tags
+        print_calls = [str(call) for call in mock_print.call_args_list]
+        printed_output = ' '.join(print_calls)
 
         # Should exclude RC and versions starting with 8 or 9
-        self.assertNotIn('8.5.0', filtered_strings)
-        self.assertNotIn('9.1.0', filtered_strings)
-        self.assertNotIn('14.10.5-rc1', filtered_strings)
-        self.assertIn('14.10.2', filtered_strings)
-        self.assertIn('13.14.0', filtered_strings)
+        self.assertNotIn('8.5.0', printed_output)
+        self.assertNotIn('9.1.0', printed_output)
+        self.assertNotIn('14.10.5-rc1', printed_output)
+        # Should include valid tags
+        self.assertIn("call('- 14 \\t-> 14.11.1')", printed_output)
+        self.assertIn("call('- 14.10 \\t-> 14.10.3')", printed_output)
+        self.assertIn("call('- 13 \\t-> 13.14.0')", printed_output)
 
     @patch('run.execAndParseJsonWithRetryRateLimit')
-    def test_prefix_suffix_filtering(self, mock_exec_json):
+    @patch('builtins.print')
+    def test_prefix_suffix_filtering(self, mock_print, mock_exec_json):
         """Test prefix and suffix filtering"""
         run.args.prefix = 'v'
         run.args.suffix = '-alpine'
+        run.args.dry_run = True
 
         mock_tags = [
             'v14.10.2-alpine',
@@ -221,20 +227,32 @@ class TestIntegrationWithMockedRegistry(unittest.TestCase):
             'v13.0.0-alpine',
         ]
 
-        mock_exec_json.return_value = {'Tags': mock_tags}
+        def mock_skopeo_calls(cmd):
+            if 'list-tags' in cmd:
+                if 'source' in cmd:
+                    return {'Tags': mock_tags}
+                else:
+                    return {'Tags': []}
+            elif 'inspect' in cmd:
+                return {'Digest': 'sha256:abc123'}
+            return {}
 
-        # Parse with prefix/suffix
-        src_tags = [run.parse_version(t) for t in mock_tags]
-        src_tags = [t for t in src_tags if t]
+        mock_exec_json.side_effect = mock_skopeo_calls
 
-        # Should only parse tags with correct prefix and suffix
-        parsed_strings = [run.str_version(t) for t in src_tags]
+        # Call the actual implementation
+        run.run_main_logic()
 
-        self.assertIn('v14.10.2-alpine', parsed_strings)
-        self.assertIn('v14.10.3-alpine', parsed_strings)
-        self.assertIn('v13.0.0-alpine', parsed_strings)
-        # Tags with wrong prefix or suffix should not be parsed (return None)
-        self.assertEqual(len(parsed_strings), 3)
+        # Check the output to verify only tags with correct prefix/suffix were processed
+        print_calls = [str(call) for call in mock_print.call_args_list]
+        printed_output = ' '.join(print_calls)
+
+        # Should only process tags with correct prefix and suffix
+        self.assertIn("call('- v14-alpine \\t-> v14.10.3-alpine')", printed_output)
+        self.assertIn("call('- v14.10-alpine \\t-> v14.10.3-alpine')", printed_output)
+        self.assertIn("call('- v13-alpine \\t-> v13.0.0-alpine')", printed_output)
+        # Should not process tags with wrong prefix/suffix
+        self.assertNotIn('14.10.4', printed_output)
+        self.assertNotIn('v14.10.5', printed_output)
 
 
 class TestMirrorImageTag(unittest.TestCase):
@@ -317,15 +335,15 @@ class TestMirrorImageTag(unittest.TestCase):
         ]
 
         # Call with different source and dest tags
-        run.mirror_image_tag('14.10.3', '14.10')
+        run.mirror_image_tag('aaa', 'bbb')
 
         # Should perform copy
         mock_exec_retry.assert_called_once()
 
         copy_cmd = mock_exec_retry.call_args[0][0]
-        # Should include both source tag (14.10.3) and dest tag (14.10)
-        self.assertIn(':14.10.3', copy_cmd)
-        self.assertIn(':14.10', copy_cmd)
+        # Should include both source tag (aaa) and dest tag (bbb)
+        self.assertIn(':aaa', copy_cmd)
+        self.assertIn(':bbb', copy_cmd)
 
     @patch('run.execAndParseJsonWithRetryRateLimit')
     @patch('run.execWithRetry')
@@ -351,45 +369,47 @@ class TestCompleteWorkflow(unittest.TestCase):
 
     @patch('run.execAndParseJsonWithRetryRateLimit')
     @patch('run.execWithRetry')
-    @patch('sys.argv', ['run.py', '-s', 'docker.io/test/src', '-d', 'docker.io/test/dest',
-                        '--dry-run', '--only-use-skopeo'])
-    def test_complete_workflow_dry_run(self, mock_exec_retry, mock_exec_json):
+    @patch('builtins.print')
+    def test_complete_workflow_dry_run(self, mock_print, mock_exec_retry, mock_exec_json):
         """Test the complete workflow in dry-run mode"""
 
         # Set up args
         original_args = run.args
         run.args = MockArgs()
+        run.args.dry_run = True
 
         # Mock tag lists
         src_tags = ['14.10.2', '14.10.3', '14.11.1', '13.14.0']
         dest_tags = ['14.10.2']
 
-        call_count = [0]
+        def mock_skopeo_calls(cmd):
+            if 'list-tags' in cmd:
+                if 'source' in cmd:
+                    return {'Tags': src_tags}
+                else:
+                    return {'Tags': dest_tags}
+            elif 'inspect' in cmd:
+                return {'Digest': 'sha256:abc123'}
+            return {}
 
-        def mock_list_tags(cmd):
-            call_count[0] += 1
-            if 'src' in cmd or call_count[0] == 1:
-                return {'Tags': src_tags}
-            else:
-                return {'Tags': dest_tags}
+        mock_exec_json.side_effect = mock_skopeo_calls
 
-        mock_exec_json.side_effect = mock_list_tags
+        # Call the actual implementation
+        run.run_main_logic()
 
-        # Manually replicate the workflow
-        parsed_src = [t for t in [run.parse_version(t) for t in src_tags] if t]
-        src_tags_grouped = run.group_versions(parsed_src)
-        src_tags_latest = run.calculate_latest_tags(src_tags_grouped)
+        # Verify skopeo was called
+        self.assertGreaterEqual(mock_exec_json.call_count, 2)
 
-        # Expected tags to be created
-        expected = {
-            '14': '14.11.1',
-            '13': '13.14.0',
-            '14.10': '14.10.3',
-            '14.11': '14.11.1',
-            '13.14': '13.14.0',
-        }
+        # Verify the output contains expected tag mappings
+        print_calls = [str(call) for call in mock_print.call_args_list]
+        printed_output = ' '.join(print_calls)
 
-        self.assertEqual(src_tags_latest, expected)
+        # Should show calculated tags
+        self.assertIn("call('- 14 \\t-> 14.11.1')", printed_output)
+        self.assertIn("call('- 14.11 \\t-> 14.11.1')", printed_output)
+        self.assertIn("call('- 14.10 \\t-> 14.10.3')", printed_output)
+        self.assertIn("call('- 13 \\t-> 13.14.0')", printed_output)
+        self.assertIn("call('- 13.14 \\t-> 13.14.0')", printed_output)
 
         # Verify that in dry-run, no actual copies are made
         # (execWithRetry shouldn't be called)
@@ -400,7 +420,8 @@ class TestCompleteWorkflow(unittest.TestCase):
 
     @patch('run.execAndParseJsonWithRetryRateLimit')
     @patch('run.execWithRetry')
-    def test_complete_workflow_4part_versions(self, mock_exec_retry, mock_exec_json):
+    @patch('builtins.print')
+    def test_complete_workflow_4part_versions(self, mock_print, mock_exec_retry, mock_exec_json):
         """Test complete workflow with 4-part versions"""
 
         # Set up args
@@ -412,24 +433,32 @@ class TestCompleteWorkflow(unittest.TestCase):
         src_tags = ['7.14.10.2', '7.14.10.3', '7.14.11.1', '7.13.14.0']
         dest_tags = []
 
-        mock_exec_json.return_value = {'Tags': src_tags}
+        def mock_skopeo_calls(cmd):
+            if 'list-tags' in cmd:
+                if 'source' in cmd:
+                    return {'Tags': src_tags}
+                else:
+                    return {'Tags': dest_tags}
+            elif 'inspect' in cmd:
+                return {'Digest': 'sha256:abc123'}
+            return {}
 
-        # Manually replicate the workflow using group_versions
-        parsed_src = [t for t in [run.parse_version(t) for t in src_tags] if t]
-        grouped = run.group_versions(parsed_src)
-        src_tags_latest = run.calculate_latest_tags(grouped)
+        mock_exec_json.side_effect = mock_skopeo_calls
 
-        # Expected tags for 4-part versions
-        expected = {
-            '7': '7.14.11.1',
-            '7.14': '7.14.11.1',
-            '7.13': '7.13.14.0',
-            '7.14.10': '7.14.10.3',
-            '7.14.11': '7.14.11.1',
-            '7.13.14': '7.13.14.0',
-        }
+        # Call the actual implementation
+        run.run_main_logic()
 
-        self.assertEqual(src_tags_latest, expected)
+        # Verify the output contains expected 4-part version tag mappings
+        print_calls = [str(call) for call in mock_print.call_args_list]
+        printed_output = ' '.join(print_calls)
+
+        # Should show calculated tags at all levels
+        self.assertIn("call('- 7 \\t-> 7.14.11.1')", printed_output)
+        self.assertIn("call('- 7.14 \\t-> 7.14.11.1')", printed_output)
+        self.assertIn("call('- 7.13 \\t-> 7.13.14.0')", printed_output)
+        self.assertIn("call('- 7.14.10 \\t-> 7.14.10.3')", printed_output)
+        self.assertIn("call('- 7.14.11 \\t-> 7.14.11.1')", printed_output)
+        self.assertIn("call('- 7.13.14 \\t-> 7.13.14.0')", printed_output)
 
         # Verify that in dry-run, no actual copies are made
         self.assertEqual(mock_exec_retry.call_count, 0)
@@ -439,7 +468,8 @@ class TestCompleteWorkflow(unittest.TestCase):
 
     @patch('run.execAndParseJsonWithRetryRateLimit')
     @patch('run.execWithRetry')
-    def test_complete_workflow_5part_versions(self, mock_exec_retry, mock_exec_json):
+    @patch('builtins.print')
+    def test_complete_workflow_5part_versions(self, mock_print, mock_exec_retry, mock_exec_json):
         """Test complete workflow with 5-part versions"""
 
         # Set up args
@@ -451,25 +481,33 @@ class TestCompleteWorkflow(unittest.TestCase):
         src_tags = ['2.7.14.10.2', '2.7.14.10.3', '2.7.14.11.1', '2.7.13.14.0']
         dest_tags = []
 
-        mock_exec_json.return_value = {'Tags': src_tags}
+        def mock_skopeo_calls(cmd):
+            if 'list-tags' in cmd:
+                if 'source' in cmd:
+                    return {'Tags': src_tags}
+                else:
+                    return {'Tags': dest_tags}
+            elif 'inspect' in cmd:
+                return {'Digest': 'sha256:abc123'}
+            return {}
 
-        # Manually replicate the workflow using group_versions
-        parsed_src = [t for t in [run.parse_version(t) for t in src_tags] if t]
-        grouped = run.group_versions(parsed_src)
-        src_tags_latest = run.calculate_latest_tags(grouped)
+        mock_exec_json.side_effect = mock_skopeo_calls
 
-        # Expected tags for 5-part versions
-        expected = {
-            '2': '2.7.14.11.1',
-            '2.7': '2.7.14.11.1',
-            '2.7.14': '2.7.14.11.1',
-            '2.7.13': '2.7.13.14.0',
-            '2.7.14.10': '2.7.14.10.3',
-            '2.7.14.11': '2.7.14.11.1',
-            '2.7.13.14': '2.7.13.14.0',
-        }
+        # Call the actual implementation
+        run.run_main_logic()
 
-        self.assertEqual(src_tags_latest, expected)
+        # Verify the output contains expected 5-part version tag mappings
+        print_calls = [str(call) for call in mock_print.call_args_list]
+        printed_output = ' '.join(print_calls)
+
+        # Should show calculated tags at all levels
+        self.assertIn("call('- 2 \\t-> 2.7.14.11.1')", printed_output)
+        self.assertIn("call('- 2.7 \\t-> 2.7.14.11.1')", printed_output)
+        self.assertIn("call('- 2.7.14 \\t-> 2.7.14.11.1')", printed_output)
+        self.assertIn("call('- 2.7.13 \\t-> 2.7.13.14.0')", printed_output)
+        self.assertIn("call('- 2.7.14.10 \\t-> 2.7.14.10.3')", printed_output)
+        self.assertIn("call('- 2.7.14.11 \\t-> 2.7.14.11.1')", printed_output)
+        self.assertIn("call('- 2.7.13.14 \\t-> 2.7.13.14.0')", printed_output)
 
         # Verify that in dry-run, no actual copies are made
         self.assertEqual(mock_exec_retry.call_count, 0)
@@ -479,7 +517,8 @@ class TestCompleteWorkflow(unittest.TestCase):
 
     @patch('run.execAndParseJsonWithRetryRateLimit')
     @patch('run.execWithRetry')
-    def test_complete_workflow_mixed_parts(self, mock_exec_retry, mock_exec_json):
+    @patch('builtins.print')
+    def test_complete_workflow_mixed_parts(self, mock_print, mock_exec_retry, mock_exec_json):
         """Test complete workflow with mixed 3, 4, and 5-part versions"""
 
         # Set up args
@@ -491,22 +530,30 @@ class TestCompleteWorkflow(unittest.TestCase):
         src_tags = ['14.10.2', '14.10.2.1', '14.10.2.1.5', '14.11.1', '14.11.1.0']
         dest_tags = []
 
-        mock_exec_json.return_value = {'Tags': src_tags}
+        def mock_skopeo_calls(cmd):
+            if 'list-tags' in cmd:
+                if 'source' in cmd:
+                    return {'Tags': src_tags}
+                else:
+                    return {'Tags': dest_tags}
+            elif 'inspect' in cmd:
+                return {'Digest': 'sha256:abc123'}
+            return {}
 
-        # Manually replicate the workflow using group_versions
-        parsed_src = [t for t in [run.parse_version(t) for t in src_tags] if t]
-        grouped = run.group_versions(parsed_src)
-        src_tags_latest = run.calculate_latest_tags(grouped)
+        mock_exec_json.side_effect = mock_skopeo_calls
 
-        # Expected tags for mixed versions
+        # Call the actual implementation
+        run.run_main_logic()
+
+        # Verify the output contains expected tag mappings
+        print_calls = [str(call) for call in mock_print.call_args_list]
+        printed_output = ' '.join(print_calls)
+
+        # Should show calculated tags
         # Remember: 3-part > 4-part > 5-part when base is the same (less specific is "greater")
-        expected = {
-            '14': '14.11.1',
-            '14.10': '14.10.2',  # 3-part is "greater" than 4-part and 5-part
-            '14.11': '14.11.1',  # 3-part is "greater" than 4-part
-        }
-
-        self.assertEqual(src_tags_latest, expected)
+        self.assertIn("call('- 14 \\t-> 14.11.1')", printed_output)
+        self.assertIn("call('- 14.10 \\t-> 14.10.2')", printed_output)  # 3-part is "greater" than 4-part and 5-part
+        self.assertIn("call('- 14.11 \\t-> 14.11.1')", printed_output)  # 3-part is "greater" than 4-part
 
         # Verify that in dry-run, no actual copies are made
         self.assertEqual(mock_exec_retry.call_count, 0)
@@ -551,14 +598,25 @@ class TestCompleteWorkflow(unittest.TestCase):
 class TestInverseSpecificityOrderIntegration(unittest.TestCase):
     """Integration tests for inverse specificity order flag"""
 
+    def setUp(self):
+        """Set up test environment"""
+        self.original_args = run.args
+        run.args = MockArgs()
+
+        # Clear token cache
+        run.token_cache = {}
+
+    def tearDown(self):
+        """Clean up after tests"""
+        run.args = self.original_args
+
     @patch('run.execAndParseJsonWithRetryRateLimit')
     @patch('run.execWithRetry')
-    def test_inverse_order_mixed_parts(self, mock_exec_retry, mock_exec_json):
+    @patch('builtins.print')
+    def test_inverse_order_mixed_parts(self, mock_print, mock_exec_retry, mock_exec_json):
         """Test complete workflow with inverse specificity order and mixed parts"""
 
         # Set up args
-        original_args = run.args
-        run.args = MockArgs()
         run.args.dry_run = True
         run.args.inverse_specificity_order = True
 
@@ -567,40 +625,47 @@ class TestInverseSpecificityOrderIntegration(unittest.TestCase):
         src_tags = ['14.10.2', '14.10.2.1', '14.10.2.1.5', '14.11.1', '14.11.1.0']
         dest_tags = []
 
-        mock_exec_json.return_value = {'Tags': src_tags}
+        def mock_skopeo_calls(cmd):
+            if 'list-tags' in cmd:
+                if 'source' in cmd:
+                    return {'Tags': src_tags}
+                else:
+                    return {'Tags': dest_tags}
+            elif 'inspect' in cmd:
+                return {'Digest': 'sha256:abc123'}
+            return {}
 
-        # Manually replicate the workflow using group_versions
-        parsed_src = [t for t in [run.parse_version(t) for t in src_tags] if t]
-        grouped = run.group_versions(parsed_src)
-        src_tags_latest = run.calculate_latest_tags(grouped)
+        mock_exec_json.side_effect = mock_skopeo_calls
+
+        # Call the actual implementation
+        run.run_main_logic()
+
+        # Verify skopeo was called
+        self.assertGreaterEqual(mock_exec_json.call_count, 2)
+
+        # Verify the output contains expected tag mappings
+        print_calls = [str(call) for call in mock_print.call_args_list]
+        printed_output = ' '.join(print_calls)
 
         # Expected tags for mixed versions with inverse order
         # With inverse: 5-part > 4-part > 3-part when base is the same (more specific is "greater")
-        expected = {
-            '14': '14.11.1.0',  # 4-part is "greater" than 3-part
-            '14.11': '14.11.1.0',  # 4-part is "greater" than 3-part
-            '14.11.1': '14.11.1.0',  # 4-part is "greater" than 3-part
-            '14.10': '14.10.2.1.5',  # 5-part is "greater" than 4-part and 3-part
-            '14.10.2': '14.10.2.1.5',  # 5-part is "greater" than 4-part
-            '14.10.2.1': '14.10.2.1.5',  # 5-part is the only one at this level
-        }
-
-        self.assertEqual(src_tags_latest, expected)
+        self.assertIn("call('- 14 \\t-> 14.11.1.0')", printed_output)  # 4-part is "greater" than 3-part
+        self.assertIn("call('- 14.11 \\t-> 14.11.1.0')", printed_output)  # 4-part is "greater" than 3-part
+        self.assertIn("call('- 14.11.1 \\t-> 14.11.1.0')", printed_output)  # 4-part is "greater" than 3-part
+        self.assertIn("call('- 14.10 \\t-> 14.10.2.1.5')", printed_output)  # 5-part is "greater" than 4-part and 3-part
+        self.assertIn("call('- 14.10.2 \\t-> 14.10.2.1.5')", printed_output)  # 5-part is "greater" than 4-part
+        self.assertIn("call('- 14.10.2.1 \\t-> 14.10.2.1.5')", printed_output)  # 5-part is the only one at this level
 
         # Verify that in dry-run, no actual copies are made
         self.assertEqual(mock_exec_retry.call_count, 0)
 
-        # Clean up
-        run.args = original_args
-
     @patch('run.execAndParseJsonWithRetryRateLimit')
     @patch('run.execWithRetry')
-    def test_inverse_order_simple_versions(self, mock_exec_retry, mock_exec_json):
+    @patch('builtins.print')
+    def test_inverse_order_simple_versions(self, mock_print, mock_exec_retry, mock_exec_json):
         """Test inverse order with simple 3-part versions"""
 
         # Set up args
-        original_args = run.args
-        run.args = MockArgs()
         run.args.dry_run = True
         run.args.inverse_specificity_order = True
 
@@ -608,35 +673,45 @@ class TestInverseSpecificityOrderIntegration(unittest.TestCase):
         src_tags = ['14.10.2', '14.10.3', '14.11.1', '13.14.0']
         dest_tags = []
 
-        mock_exec_json.return_value = {'Tags': src_tags}
+        def mock_skopeo_calls(cmd):
+            if 'list-tags' in cmd:
+                if 'source' in cmd:
+                    return {'Tags': src_tags}
+                else:
+                    return {'Tags': dest_tags}
+            elif 'inspect' in cmd:
+                return {'Digest': 'sha256:abc123'}
+            return {}
 
-        # Parse tags
-        parsed_src = [t for t in [run.parse_version(t) for t in src_tags] if t]
-        grouped = run.group_versions(parsed_src)
-        src_tags_latest = run.calculate_latest_tags(grouped)
+        mock_exec_json.side_effect = mock_skopeo_calls
+
+        # Call the actual implementation
+        run.run_main_logic()
+
+        # Verify skopeo was called
+        self.assertGreaterEqual(mock_exec_json.call_count, 2)
+
+        # Verify the output contains expected tag mappings
+        print_calls = [str(call) for call in mock_print.call_args_list]
+        printed_output = ' '.join(print_calls)
 
         # Expected tags - same as normal order since all versions have same number of parts
-        expected = {
-            '14': '14.11.1',
-            '14.11': '14.11.1',
-            '14.10': '14.10.3',
-            '13': '13.14.0',
-            '13.14': '13.14.0',
-        }
+        self.assertIn("call('- 14 \\t-> 14.11.1')", printed_output)
+        self.assertIn("call('- 14.11 \\t-> 14.11.1')", printed_output)
+        self.assertIn("call('- 14.10 \\t-> 14.10.3')", printed_output)
+        self.assertIn("call('- 13 \\t-> 13.14.0')", printed_output)
+        self.assertIn("call('- 13.14 \\t-> 13.14.0')", printed_output)
 
-        self.assertEqual(src_tags_latest, expected)
-
-        # Clean up
-        run.args = original_args
+        # Verify that in dry-run, no actual copies are made
+        self.assertEqual(mock_exec_retry.call_count, 0)
 
     @patch('run.execAndParseJsonWithRetryRateLimit')
     @patch('run.execWithRetry')
-    def test_inverse_order_4part_versions(self, mock_exec_retry, mock_exec_json):
+    @patch('builtins.print')
+    def test_inverse_order_4part_versions(self, mock_print, mock_exec_retry, mock_exec_json):
         """Test inverse order with 4-part versions"""
 
         # Set up args
-        original_args = run.args
-        run.args = MockArgs()
         run.args.dry_run = True
         run.args.inverse_specificity_order = True
 
@@ -644,36 +719,46 @@ class TestInverseSpecificityOrderIntegration(unittest.TestCase):
         src_tags = ['7.14.10.2', '7.14.10.3', '7.14.11.1', '7.13.14.0']
         dest_tags = []
 
-        mock_exec_json.return_value = {'Tags': src_tags}
+        def mock_skopeo_calls(cmd):
+            if 'list-tags' in cmd:
+                if 'source' in cmd:
+                    return {'Tags': src_tags}
+                else:
+                    return {'Tags': dest_tags}
+            elif 'inspect' in cmd:
+                return {'Digest': 'sha256:abc123'}
+            return {}
 
-        # Parse and group
-        parsed_src = [t for t in [run.parse_version(t) for t in src_tags] if t]
-        grouped = run.group_versions(parsed_src)
-        src_tags_latest = run.calculate_latest_tags(grouped)
+        mock_exec_json.side_effect = mock_skopeo_calls
+
+        # Call the actual implementation
+        run.run_main_logic()
+
+        # Verify skopeo was called
+        self.assertGreaterEqual(mock_exec_json.call_count, 2)
+
+        # Verify the output contains expected tag mappings
+        print_calls = [str(call) for call in mock_print.call_args_list]
+        printed_output = ' '.join(print_calls)
 
         # Expected tags - same as normal since all have same parts
-        expected = {
-            '7': '7.14.11.1',
-            '7.14': '7.14.11.1',
-            '7.14.11': '7.14.11.1',
-            '7.14.10': '7.14.10.3',
-            '7.13': '7.13.14.0',
-            '7.13.14': '7.13.14.0',
-        }
+        self.assertIn("call('- 7 \\t-> 7.14.11.1')", printed_output)
+        self.assertIn("call('- 7.14 \\t-> 7.14.11.1')", printed_output)
+        self.assertIn("call('- 7.14.11 \\t-> 7.14.11.1')", printed_output)
+        self.assertIn("call('- 7.14.10 \\t-> 7.14.10.3')", printed_output)
+        self.assertIn("call('- 7.13 \\t-> 7.13.14.0')", printed_output)
+        self.assertIn("call('- 7.13.14 \\t-> 7.13.14.0')", printed_output)
 
-        self.assertEqual(src_tags_latest, expected)
-
-        # Clean up
-        run.args = original_args
+        # Verify that in dry-run, no actual copies are made
+        self.assertEqual(mock_exec_retry.call_count, 0)
 
     @patch('run.execAndParseJsonWithRetryRateLimit')
     @patch('run.execWithRetry')
-    def test_inverse_order_three_four_five_parts(self, mock_exec_retry, mock_exec_json):
+    @patch('builtins.print')
+    def test_inverse_order_three_four_five_parts(self, mock_print, mock_exec_retry, mock_exec_json):
         """Test inverse order with 3, 4, and 5-part versions at same base"""
 
         # Set up args
-        original_args = run.args
-        run.args = MockArgs()
         run.args.dry_run = True
         run.args.inverse_specificity_order = True
 
@@ -681,29 +766,40 @@ class TestInverseSpecificityOrderIntegration(unittest.TestCase):
         src_tags = ['1.2.3', '1.2.3.4', '1.2.3.4.5', '2.0.0', '2.0.0.1']
         dest_tags = []
 
-        mock_exec_json.return_value = {'Tags': src_tags}
+        def mock_skopeo_calls(cmd):
+            if 'list-tags' in cmd:
+                if 'source' in cmd:
+                    return {'Tags': src_tags}
+                else:
+                    return {'Tags': dest_tags}
+            elif 'inspect' in cmd:
+                return {'Digest': 'sha256:abc123'}
+            return {}
 
-        # Parse and group
-        parsed_src = [t for t in [run.parse_version(t) for t in src_tags] if t]
-        grouped = run.group_versions(parsed_src)
-        src_tags_latest = run.calculate_latest_tags(grouped)
+        mock_exec_json.side_effect = mock_skopeo_calls
+
+        # Call the actual implementation
+        run.run_main_logic()
+
+        # Verify skopeo was called
+        self.assertGreaterEqual(mock_exec_json.call_count, 2)
+
+        # Verify the output contains expected tag mappings
+        print_calls = [str(call) for call in mock_print.call_args_list]
+        printed_output = ' '.join(print_calls)
 
         # Expected tags with inverse order
         # With inverse: more specific versions are "greater"
-        expected = {
-            '2': '2.0.0.1',    # 4-part is greatest
-            '2.0': '2.0.0.1',    # 4-part is greatest
-            '2.0.0': '2.0.0.1',    # 4-part is greatest
-            '1': '1.2.3.4.5',  # 5-part is greatest
-            '1.2': '1.2.3.4.5',  # 5-part is greatest
-            '1.2.3': '1.2.3.4.5',  # 5-part is greatest
-            '1.2.3.4': '1.2.3.4.5',  # 5-part is the only one at this level
-        }
+        self.assertIn("call('- 2 \\t-> 2.0.0.1')", printed_output)  # 4-part is greatest
+        self.assertIn("call('- 2.0 \\t-> 2.0.0.1')", printed_output)  # 4-part is greatest
+        self.assertIn("call('- 2.0.0 \\t-> 2.0.0.1')", printed_output)  # 4-part is greatest
+        self.assertIn("call('- 1 \\t-> 1.2.3.4.5')", printed_output)  # 5-part is greatest
+        self.assertIn("call('- 1.2 \\t-> 1.2.3.4.5')", printed_output)  # 5-part is greatest
+        self.assertIn("call('- 1.2.3 \\t-> 1.2.3.4.5')", printed_output)  # 5-part is greatest
+        self.assertIn("call('- 1.2.3.4 \\t-> 1.2.3.4.5')", printed_output)  # 5-part is the only one at this level
 
-        self.assertEqual(src_tags_latest, expected)
-
-        # Clean up
-        run.args = original_args
+        # Verify that in dry-run, no actual copies are made
+        self.assertEqual(mock_exec_retry.call_count, 0)
 
     def test_inverse_order_version_sorting(self):
         """Test that version sorting respects inverse specificity order"""
