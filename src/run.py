@@ -206,13 +206,13 @@ def run_main_logic():
     dest_tags_latest_sorted = [t for t in dest2src_tags_latest.keys()]
     dest_tags_latest_sorted.sort(key=cmp_to_key(lambda x, y: compare_version(None if x is None else prepare_for_sort(parse_version(x)), None if y is None else prepare_for_sort(parse_version(y)))))
     if args.update_latest:
-        dest_tag_latest = str_version(max_version([parse_version(t) for t in dest_tags_latest_sorted if t is not None]))
+        src_tag_latest = max_version(src_tags)
 
     print('New calculated tags are:')
     for dest_tag in dest_tags_latest_sorted:
         print('- ' + dest_tag + ' \t-> ' + str_version(dest2src_tags_latest[dest_tag], use_original=True))
     if args.update_latest:
-        print('- latest \t-> ' + str_version(dest2src_tags_latest[dest_tag_latest], use_original=True))
+        print('- latest \t-> ' + str_version(src_tag_latest, use_original=True))
 
     dest_image = to_full_image_url(args.dest)
     dest_url = parse_image_url(args.dest)
@@ -251,7 +251,7 @@ def run_main_logic():
             if not args.only_new_tags or not dest_tag in dest_tags:
                 mirror_image_tag(str_version(dest2src_tags_latest[dest_tag], use_original=True), dest_tag)
         if args.update_latest:
-            mirror_image_tag(str_version(dest2src_tags_latest[dest_tag_latest], use_original=True), 'latest')
+            mirror_image_tag(str_version(src_tag_latest, use_original=True), 'latest')
 
 
 def exec(cmd, ignoreError=False, input=None):
