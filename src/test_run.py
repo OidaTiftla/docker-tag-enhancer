@@ -13,6 +13,7 @@ class MockArgs:
         self.prefix = None
         self.suffix = None
         self.filter = None
+        self.tag_cleanup_patterns = None
         self.src = 'docker.io/test/image'
         self.dest = 'docker.io/test/dest'
         self.dry_run = True
@@ -26,6 +27,89 @@ class MockArgs:
         self.login = False
         self.inverse_specificity_order = False
         self.verbose = 0
+
+
+class TestTagCleanup(unittest.TestCase):
+    """Test tag cleanup functionality"""
+
+    def test_cleanup_simple_removal(self):
+        """Test removing a simple pattern from tag"""
+        result = run.apply_tag_cleanup('test-v3.13.13-2024-08-01', ['-\\d{4}-.*'])
+        self.assertEqual(result, 'test-v3.13.13')
+
+    def test_cleanup_sha_pattern(self):
+        """Test removing SHA pattern from tag"""
+        pattern = '-\\d{4}-\\d{2}-\\d{2}T\\d{2}-\\d{2}-\\d{2}-UTC-SHA-[a-f0-9]+'
+        result = run.apply_tag_cleanup('test-v3.13.13-2024-08-01T13-03-49-UTC-SHA-ea46288f', [pattern])
+        self.assertEqual(result, 'test-v3.13.13')
+
+    def test_cleanup_sed_replacement(self):
+        """Test sed-like replacement pattern"""
+        result = run.apply_tag_cleanup('foo-bar-baz', ['s/bar/replaced/'])
+        self.assertEqual(result, 'foo-replaced-baz')
+
+    def test_cleanup_sed_replacement_without_last_delimiter(self):
+        """Test sed-like replacement pattern without last delimiter"""
+        result = run.apply_tag_cleanup('foo-bar-baz', ['s/bar/replaced'])
+        self.assertEqual(result, 'foo-replaced-baz')
+
+    def test_cleanup_sed_with_different_delimiter(self):
+        """Test sed-like pattern with different delimiter"""
+        result = run.apply_tag_cleanup('foo/bar/baz', ['s|/|-|'])
+        # re.sub replaces all occurrences
+        self.assertEqual(result, 'foo-bar-baz')
+
+    def test_cleanup_multiple_patterns(self):
+        """Test applying multiple cleanup patterns"""
+        patterns = ['-\\d{4}-\\d{2}-\\d{2}T.*UTC', '-SHA-[a-f0-9]+']
+        result = run.apply_tag_cleanup('v1.2.3-2024-01-01T10-20-30-UTC-SHA-abc123', patterns)
+        # First pattern removes timestamp up to UTC, second pattern removes remaining SHA
+        self.assertEqual(result, 'v1.2.3')
+
+    def test_cleanup_no_patterns(self):
+        """Test that None patterns return original tag"""
+        result = run.apply_tag_cleanup('test-v3.13.13', None)
+        self.assertEqual(result, 'test-v3.13.13')
+
+    def test_cleanup_empty_patterns(self):
+        """Test that empty pattern list returns original tag"""
+        result = run.apply_tag_cleanup('test-v3.13.13', [])
+        self.assertEqual(result, 'test-v3.13.13')
+
+    def test_cleanup_sed_global_replace(self):
+        """Test sed pattern replaces all occurrences (like sed with 'g' flag)"""
+        result = run.apply_tag_cleanup('foo-bar-bar-baz', ['s/-bar/-replaced/'])
+        self.assertEqual(result, 'foo-replaced-replaced-baz')
+
+    def test_cleanup_complex_sed_pattern(self):
+        """Test complex sed replacement"""
+        result = run.apply_tag_cleanup('v1.2.3-rc1', ['s/-rc[0-9]+/-release/'])
+        self.assertEqual(result, 'v1.2.3-release')
+
+    def test_cleanup_with_capture_groups(self):
+        """Test sed replacement with capture groups using $1, $2, $3"""
+        result = run.apply_tag_cleanup('v3-13-14', ['s/v(\\d+)-(\\d+)-(\\d+)/$1.$2.$3/'])
+        self.assertEqual(result, '3.13.14')
+
+    def test_cleanup_with_capture_groups_braces(self):
+        """Test sed replacement with ${1}, ${2} notation"""
+        result = run.apply_tag_cleanup('v3-13-14', ['s/v(\\d+)-(\\d+)-(\\d+)/${1}.${2}.${3}/'])
+        self.assertEqual(result, '3.13.14')
+
+    def test_cleanup_capture_groups_complex(self):
+        """Test capture groups with more complex pattern"""
+        result = run.apply_tag_cleanup('test-v3.13.14-build123', ['s/test-v(\\d+\\.\\d+\\.\\d+)-build\\d+/$1/'])
+        self.assertEqual(result, '3.13.14')
+
+    def test_cleanup_capture_groups_partial(self):
+        """Test capture groups with partial replacement"""
+        result = run.apply_tag_cleanup('foo-v1.2.3-bar', ['s/foo-v(\\d+\\.\\d+\\.\\d+)-bar/version-$1/'])
+        self.assertEqual(result, 'version-1.2.3')
+
+    def test_cleanup_capture_groups_reorder(self):
+        """Test capture groups can reorder parts"""
+        result = run.apply_tag_cleanup('2024-01-15-v1.2.3', ['s/(\\d{4})-(\\d{2})-(\\d{2})-v(.*)/$4-$1$2$3/'])
+        self.assertEqual(result, '1.2.3-20240115')
 
 
 class TestVersionParsing(unittest.TestCase):
@@ -138,6 +222,37 @@ class TestVersionParsing(unittest.TestCase):
 
         # Should return None if suffix doesn't match
         self.assertIsNone(run.parse_version('14.10.2'))
+
+    def test_parse_with_cleanup_pattern(self):
+        """Test parsing with cleanup patterns applied"""
+        run.args.prefix = 'test-v'
+        run.args.tag_cleanup_patterns = ['-\\d{4}-\\d{2}-\\d{2}T\\d{2}-\\d{2}-\\d{2}-UTC-SHA-[a-f0-9]+']
+
+        # Tag with timestamp and SHA should be cleaned before parsing
+        result = run.parse_version('test-v3.13.13-2024-08-01T13-03-49-UTC-SHA-ea46288f')
+        self.assertIsNotNone(result)
+        self.assertEqual(result['parts'], ['3', '13', '13'])
+
+    def test_parse_with_cleanup_stores_original(self):
+        """Test that parse_version stores original tag when provided"""
+        run.args.prefix = 'test-v'
+        run.args.tag_cleanup_patterns = ['-\\d{4}-.*']
+
+        original = 'test-v3.13.13-2024-08-01T13-03-49-UTC-SHA-ea46288f'
+        result = run.parse_version(original, original_tag=original)
+        self.assertIsNotNone(result)
+        self.assertEqual(result['original_tag'], original)
+        self.assertEqual(result['parts'], ['3', '13', '13'])
+
+    def test_parse_multiple_cleanup_patterns(self):
+        """Test parsing with multiple cleanup patterns"""
+        run.args.tag_cleanup_patterns = ['-SHA-[a-f0-9]+', '-UTC']
+
+        result = run.parse_version('1.2.3-UTC-SHA-abc123')
+        self.assertIsNotNone(result)
+        self.assertEqual(result['parts'], ['1', '2', '3'])
+        # Both patterns should be removed
+        self.assertEqual(run.str_version(result), '1.2.3')
 
 
 class TestVersionComparison(unittest.TestCase):
@@ -495,6 +610,27 @@ class TestVersionString(unittest.TestCase):
         """Test reconstructing 5-part version with rest suffix"""
         v = run.parse_version('1.2.3.4.5-debian')
         self.assertEqual(run.str_version(v), '1.2.3.4.5-debian')
+
+    def test_str_version_with_original_tag(self):
+        """Test str_version returns original tag when use_original=True"""
+        run.args.prefix = 'test-v'
+        run.args.tag_cleanup_patterns = ['-\\d{4}-.*']
+
+        original = 'test-v3.13.13-2024-08-01T13-03-49-UTC-SHA-ea46288f'
+        v = run.parse_version(original, original_tag=original)
+
+        # Without use_original, should return cleaned version
+        self.assertEqual(run.str_version(v, use_original=False), 'test-v3.13.13')
+
+        # With use_original, should return original tag
+        self.assertEqual(run.str_version(v, use_original=True), original)
+
+    def test_str_version_no_original_tag(self):
+        """Test str_version works normally when no original_tag exists"""
+        v = run.parse_version('1.2.3')
+
+        # Should return reconstructed version even with use_original=True
+        self.assertEqual(run.str_version(v, use_original=True), '1.2.3')
 
 
 class TestMaxVersion(unittest.TestCase):

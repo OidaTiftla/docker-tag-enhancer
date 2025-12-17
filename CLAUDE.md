@@ -18,7 +18,9 @@ The tool operates in three modes:
 
 **Key implementation details:**
 
-- **Version parsing** (parse_version, line 193): Parses semantic versions with support for 1-5 part versions (major, major.minor, major.minor.patch, major.minor.patch.build, major.minor.patch.build.build2). Supports `-rc`, `-ce`, and custom suffixes. Uses regex to extract version components plus special suffixes.
+- **Tag cleanup** (apply_tag_cleanup, line 44): Optional preprocessing of tags before version parsing. Supports regex patterns for removal and sed-like syntax for replacement (`s/pattern/replacement/`). Original tags are preserved and used when copying images.
+
+- **Version parsing** (parse_version, line 353): Parses semantic versions with support for 1-5 part versions (major, major.minor, major.minor.patch, major.minor.patch.build, major.minor.patch.build.build2). Supports `-rc`, `-ce`, and custom suffixes. Uses regex to extract version components plus special suffixes. Optionally applies cleanup patterns before parsing and stores original tag for later use.
 
 - **Version comparison** (compare_version, line 226): Custom comparator that handles:
   - Standard semver comparisons up to 5 parts (major.minor.patch.build.build2)
@@ -107,6 +109,14 @@ Key flags:
 - `-d/--dest`: Destination image repository (required)
 - `--prefix/--suffix`: Filter tags by prefix/suffix
 - `-f/--filter`: Regex filter for tags
+- `-c/--tag-cleanup-pattern`: Regex pattern to clean tags before version extraction (can be specified multiple times)
+  - Supports sed-like syntax: `s/pattern/replacement/` or simple pattern removal (just `pattern`)
+  - Capture groups supported: Use `$1`, `$2`, etc. or `${1}`, `${2}` in replacements
+  - Patterns are applied sequentially in the order specified
+  - Original tags are preserved for image copying
+  - Examples:
+    - `-c "-\d{4}-\d{2}-\d{2}T.*UTC-SHA-[a-f0-9]+"` (removes timestamp+SHA)
+    - `-c "s/v(\d+)-(\d+)-(\d+)/$1.$2.$3/"` (converts v3-13-14 to 3.13.14)
 - `--only-new-tags`: Skip copying tags that already exist at destination
 - `--update-latest`: Calculate and update the 'latest' tag
 - `--no-copy`: Dry-run calculation without copying
@@ -134,6 +144,56 @@ ENCODED=$(echo -n "$GITHUB_TOKEN" | base64)
 skopeo list-tags --registry-token="${ENCODED}" docker://ghcr.io/owner/image
 ```
 
+### Tag Cleanup Patterns
+
+The `--tag-cleanup-pattern` option allows you to clean tag names before version extraction while preserving the original tags for image copying. This is useful when tags include build metadata, timestamps, or other suffixes that should not be part of the version hierarchy.
+
+**How it works:**
+
+1. Tags are read from the source registry with their original names
+2. Cleanup patterns are applied to each tag before version parsing
+3. Version hierarchies are calculated based on the cleaned tags
+4. Original (uncleaned) tags are copied to the destination registry
+
+**Pattern syntax:**
+
+- **Simple removal**: Just provide a regex pattern to remove matching text
+  - Example: `-c "-\d{4}-.*"` removes everything from `-2024-` onwards
+- **Sed-like replacement**: Use `s/pattern/replacement/` syntax for substitutions
+  - Example: `-c "s/-rc[0-9]+/-release/"` replaces RC suffixes
+  - Any character can be used as delimiter: `s|pattern|replacement|` or `s#pattern#replacement#`
+  - Supports capture groups: Use `$1`, `$2`, `$3`, etc. or `${1}`, `${2}`, `${3}` in replacement
+    - Example: `-c "s/v(\d+)-(\d+)-(\d+)/$1.$2.$3/"` converts `v3-13-14` to `3.13.14`
+    - Example: `-c "s/(\d+)\.(\d+)\.(\d+)-build\d+/$1.$2.$3/"` removes build suffix
+- **Multiple patterns**: Specify `-c` multiple times; patterns are applied sequentially
+
+**Example use case:**
+
+Source tags with build metadata:
+```
+test-v3.13
+test-v3.13.13
+test-v3.13.13-2024-08-01T13-03-49-UTC-SHA-ea46288f
+test-v3.13.13.1-2024-08-26T15-06-04-UTC-SHA-3a5f4ddc
+test-v3.14.0-2025-03-13T10-29-34-UTC-SHA-e1e8835c
+```
+
+Command:
+```bash
+python src/run.py \
+  --src source-repo \
+  --dest dest-repo \
+  --prefix test-v \
+  --filter '-SHA-' \
+  -c '-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-UTC-SHA-[a-f0-9]+'
+```
+
+This will:
+1. Filter tags containing `-SHA-` (getting only tags with build metadata)
+2. Clean the timestamp and SHA from tags before version parsing
+3. Calculate hierarchies: `test-v3.13` → `test-v3.13.13.1`, `test-v3.14` → `test-v3.14.0`
+4. Copy original tags (with timestamps) to destination with cleaned tag names as aliases
+
 ### Version Parsing Edge Cases
 
 - Versions with 1-5 parts are supported (e.g., "13", "13.0", "13.0.1", "13.0.1.2", "13.0.1.2.3")
@@ -142,6 +202,7 @@ skopeo list-tags --registry-token="${ENCODED}" docker://ghcr.io/owner/image
 - Arbitrary rest suffixes are preserved but treated as incomparable between different rest values
 - The filter regex is applied AFTER version parsing, so only valid semver-like tags are processed
 - When comparing versions, less specific versions are treated as "greater" than more specific ones with the same base (e.g., 1.2.3 > 1.2.3.4 > 1.2.3.4.5)
+- Tag cleanup patterns (if specified) are applied BEFORE version parsing but AFTER prefix/suffix filtering
 
 ### Multi-architecture Support
 

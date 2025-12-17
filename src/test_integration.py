@@ -17,6 +17,7 @@ class MockArgs:
         self.prefix = None
         self.suffix = None
         self.filter = None
+        self.tag_cleanup_patterns = None
         self.src = 'docker.io/test/source'
         self.dest = 'docker.io/test/dest'
         self.dry_run = False
@@ -830,6 +831,90 @@ class TestInverseSpecificityOrderIntegration(unittest.TestCase):
 
         # Clean up
         run.args = original_args
+
+    @patch('run.execAndParseJsonWithRetryRateLimit')
+    @patch('run.execWithRetry')
+    @patch('builtins.print')
+    def test_tag_cleanup_with_timestamp_and_sha(self, mock_print, mock_exec_with_retry, mock_exec_json):
+        """Test tag cleanup with timestamp and SHA patterns"""
+
+        # Set up args for the initial scenario
+        run.args.prefix = 'test-v'
+        run.args.filter = '-SHA-'  # Only process tags with SHA
+        run.args.tag_cleanup_patterns = ['-\\d{4}-\\d{2}-\\d{2}T\\d{2}-\\d{2}-\\d{2}-UTC-SHA-[a-f0-9]+']
+        run.args.dry_run = False
+        run.args.no_copy = False
+
+        # Source tags from the initial scenario
+        mock_src_tags = [
+            'test-v3',
+            'test-v3.13',
+            'test-v3.13.13',
+            'test-v3.13.13-2024-08-01T13-03-49-UTC-SHA-ea46288f',
+            'test-v3.13.13.1',
+            'test-v3.13.13.1-2024-08-26T15-06-04-UTC-SHA-3a5f4ddc',
+            'test-v3.13.14',
+            'test-v3.13.14-2024-08-26T15-06-04-UTC-SHA-3a5f4ddc',
+            'test-v3.14',
+            'test-v3.14.0',
+            'test-v3.14.0-2025-03-13T10-29-34-UTC-SHA-e1e8835c',
+        ]
+
+        mock_dest_tags = []
+
+        # Mock skopeo responses: list-tags and inspect
+        def mock_skopeo_calls(cmd):
+            if 'list-tags' in cmd:
+                if 'source' in cmd:
+                    return {'Tags': mock_src_tags}
+                else:
+                    return {'Tags': mock_dest_tags}
+            elif 'inspect' in cmd:
+                # Mock digest responses for image comparison
+                # Different digests for source and dest to force copying
+                if 'dest' in cmd:
+                    # Dest always returns a different digest to trigger copy
+                    return {'Digest': 'sha256:dest-digest'}
+                else:
+                    # Source digests vary by tag
+                    if '2024-08-01' in cmd:
+                        return {'Digest': 'sha256:digest1'}
+                    elif '2024-08-26' in cmd:
+                        return {'Digest': 'sha256:digest2'}
+                    elif '2025-03-13' in cmd:
+                        return {'Digest': 'sha256:digest3'}
+                    return {'Digest': 'sha256:src-digest'}
+            return {}
+
+        mock_exec_json.side_effect = mock_skopeo_calls
+
+        # Call the actual implementation
+        run.run_main_logic()
+
+        # Verify skopeo was called
+        self.assertGreaterEqual(mock_exec_json.call_count, 2)
+
+        # Verify the output shows calculated tags
+        print_calls = [str(call) for call in mock_print.call_args_list]
+        printed_output = ' '.join(print_calls)
+
+        # Should show the calculated tag mappings
+        # Note: The cleanup patterns remove timestamps/SHA from calculated tag names,
+        # but original tags (with timestamps) are used when copying
+        self.assertIn("call('- test-v3 \\t-> test-v3.14.0')", printed_output)
+        self.assertIn("call('- test-v3.14 \\t-> test-v3.14.0')", printed_output)
+        self.assertIn("call('- test-v3.13 \\t-> test-v3.13.14')", printed_output)
+
+        # Verify that execWithRetry was called for copying images
+        exec_calls = [str(call) for call in mock_exec_with_retry.call_args_list]
+
+        # Should copy original tags (with timestamps/SHA)
+        has_original_tag_copy = any('2024-08-01T13-03-49-UTC-SHA-ea46288f' in call for call in exec_calls)
+        self.assertTrue(has_original_tag_copy, 'Should copy original tags with timestamps')
+
+        # Should also create calculated tag aliases (cleaned versions)
+        has_calculated_tag = any('test-v3.13' in call and 'test-v3.13.14' in call for call in exec_calls)
+        self.assertTrue(has_calculated_tag, 'Should create calculated tag mappings')
 
 
 if __name__ == '__main__':

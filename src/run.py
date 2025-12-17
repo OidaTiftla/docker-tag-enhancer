@@ -23,6 +23,7 @@ parser.add_argument('-d', '--dest', type=str, help='The repository image to push
 parser.add_argument('--prefix', type=str, help='A prefix of the tags to process.')
 parser.add_argument('--suffix', type=str, help='A suffix of the tags to process.')
 parser.add_argument('-f', '--filter', type=str, help='A regex to filter the tags to process.')
+parser.add_argument('-c', '--tag-cleanup-pattern', action='append', dest='tag_cleanup_patterns', help='Regex pattern to clean up tags before version extraction. Can be specified multiple times. Supports sed-like syntax with capture groups: s/pattern/replacement/ (use $1, $2, etc. for captures) or just pattern (removes match). Examples: -c "-\\d{4}-.*" or -c "s/v(\\d+)-(\\d+)-(\\d+)/$1.$2.$3/"')
 parser.add_argument('--only-new-tags', action='store_true', help='Only push new tags to destination.')
 parser.add_argument('--update-latest', action='store_true', help='Calculate and update the \'latest\' tag.')
 parser.add_argument('--no-copy', action='store_true', help='Skip the copy operation.')
@@ -38,6 +39,75 @@ parser.add_argument('-v', '--verbose', action='count', default=0, help='Increase
 
 def parse_arguments():
     return parser.parse_args()
+
+
+def apply_tag_cleanup(tag, patterns):
+    """
+    Apply cleanup patterns to a tag before version extraction.
+
+    Args:
+        tag: The tag string to clean
+        patterns: List of pattern strings in format 'pattern' or 's/pattern/replacement/'
+
+    Returns:
+        Cleaned tag string
+
+    Examples:
+        >>> apply_tag_cleanup('test-v3.13.14-2024-08-01', ['-\\\\d{4}-.*'])
+        'test-v3.13.14'
+        >>> apply_tag_cleanup('v3-13-14', ['s/v(\\\\d+)-(\\\\d+)-(\\\\d+)/$1.$2.$3/'])
+        '3.13.14'
+    """
+    if not patterns:
+        return tag
+
+    cleaned = tag
+    for pattern in patterns:
+        # Check if it's sed-like syntax: s/pattern/replacement/
+        if len(pattern) > 2 and pattern[0] == 's':
+            # Extract delimiter (character after 's')
+            delimiter = pattern[1]
+
+            # Find the pattern and replacement by parsing carefully
+            # Format: s<delim>pattern<delim>replacement<delim>[flags]
+            rest = pattern[2:]
+
+            # Find first delimiter occurrence (end of pattern)
+            pattern_end = rest.find(delimiter)
+            if pattern_end == -1:
+                # Invalid sed syntax, skip
+                raise Exception('Invalid sed-like pattern syntax: ' + pattern)
+
+            regex_pattern = rest[:pattern_end]
+            rest = rest[pattern_end + 1:]
+
+            # Find second delimiter occurrence (end of replacement)
+            replacement_end = rest.find(delimiter)
+            if replacement_end == -1:
+                # Assume rest is all replacement (no trailing delimiter)
+                replacement = rest
+                flags = ''
+            else:
+                replacement = rest[:replacement_end]
+                flags = rest[replacement_end + 1:]
+
+            if len(flags) > 0:
+                # Currently, we do not support any flags
+                raise Exception('Unsupported flags in sed-like pattern: ' + pattern)
+
+            # Convert sed-style $1, $2, etc. to Python's \1, \2, etc.
+            # Also handle ${1}, ${2} notation
+            replacement = re.sub(r'\$\{(\d+)\}', r'\\\1', replacement)  # ${1} -> \1
+            replacement = re.sub(r'\$(\d+)', r'\\\1', replacement)      # $1 -> \1
+
+            # Apply replacement (re.sub replaces all by default, like sed with 'g' flag)
+            cleaned = re.sub(regex_pattern, replacement, cleaned)
+            continue
+
+        # Otherwise, treat as a plain regex pattern (remove it)
+        cleaned = re.sub(pattern, '', cleaned)
+
+    return cleaned
 
 
 # Initialize args as None - will be set by parse_arguments() or by tests
@@ -119,7 +189,8 @@ def run_main_logic():
         for tag in sorted(src_tags):
             print('  - ' + tag)
 
-    src_tags = [parse_version(t) for t in src_tags]
+    # Parse versions, storing original tags for later use in copying
+    src_tags = [parse_version(t, original_tag=t) for t in src_tags]
     src_tags_grouped = group_versions(src_tags, prefix=args.prefix or '', suffix=args.suffix or '')
 
     if args.verbose >= 3:
@@ -173,8 +244,9 @@ def run_main_logic():
         print('- latest \t-> ' + src_tags_latest[src_tag_latest])
 
     if not args.no_copy:
-        # mirror all existing tags
-        for src_tag in [str_version(t) for t in src_tags_sorted]:
+        # mirror all existing tags (use original tags from source)
+        for src_tag_version in src_tags_sorted:
+            src_tag = str_version(src_tag_version, use_original=True)
             if not args.only_new_tags or not src_tag in dest_tags:
                 mirror_image_tag(src_tag)
 
@@ -307,7 +379,23 @@ def parse_image_url(url):
     return result
 
 
-def parse_version(text):
+def parse_version(text, original_tag=None):
+    """
+    Parse a version string into components.
+
+    Args:
+        text: The tag string to parse
+        original_tag: Optional original tag before cleanup (stored for later use)
+
+    Returns:
+        Dictionary with version components, or None if not parsable
+    """
+    # Apply cleanup patterns if configured
+    if args and args.tag_cleanup_patterns:
+        text = apply_tag_cleanup(text, args.tag_cleanup_patterns)
+        if args.verbose >= 3:
+            print(f'[DEBUG] Tag after cleanup: {original_tag or text} -> {text}')
+
     if args.prefix:
         if not text.startswith(args.prefix):
             return None
@@ -333,10 +421,28 @@ def parse_version(text):
         result['rc'] = result['rc2']
     del result['rc2']
 
+    # Store original tag if provided (used when copying images)
+    if original_tag:
+        result['original_tag'] = original_tag
+
     return result
 
 
-def str_version(v):
+def str_version(v, use_original=False):
+    """
+    Convert a parsed version back to a string.
+
+    Args:
+        v: Parsed version dictionary
+        use_original: If True and original_tag exists, return the original tag
+
+    Returns:
+        Version string
+    """
+    # If original tag is available and requested, use it
+    if use_original and 'original_tag' in v and v['original_tag']:
+        return v['original_tag']
+
     # Build version string from parts list
     version_str = '.'.join(v['parts'])
 
