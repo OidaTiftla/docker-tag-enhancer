@@ -37,6 +37,7 @@ parser.add_argument('--only-use-skopeo', action='store_true', help='Only use sko
 parser.add_argument('--inverse-specificity-order', action='store_true', help='Inverse the version specificity comparison: more specific versions (e.g., 1.2.3.4.5) are treated as greater than less specific ones (e.g., 1.2.3).')
 parser.add_argument('-v', '--verbose', action='count', default=0, help='Increase verbosity level (can be specified up to 3 times: -v for source tags, -vv to also show dest tags, -vvv for detailed debugging).')
 
+
 def parse_arguments():
     return parser.parse_args()
 
@@ -191,6 +192,8 @@ def run_main_logic():
 
     # Parse versions, storing original tags for later use in copying
     src_tags = [parse_version(t, original_tag=t) for t in src_tags]
+    src_tags_sorted = [t for t in src_tags]
+    src_tags_sorted.sort(key=cmp_to_key(lambda x, y: compare_version(prepare_for_sort(x), prepare_for_sort(y))))
     src_tags_grouped = group_versions(src_tags, prefix=args.prefix or '', suffix=args.suffix or '')
 
     if args.verbose >= 3:
@@ -199,10 +202,17 @@ def run_main_logic():
             version_strs = [str_version(v) for v in versions]
             print('  - ' + key + ' <- [' + ', '.join(version_strs) + ']')
 
-    src_tags_latest = calculate_latest_tags(src_tags_grouped)
+    dest2src_tags_latest = calculate_latest_tags(src_tags_grouped)
+    dest_tags_latest_sorted = [t for t in dest2src_tags_latest.keys()]
+    dest_tags_latest_sorted.sort(key=cmp_to_key(lambda x, y: compare_version(None if x is None else prepare_for_sort(parse_version(x)), None if y is None else prepare_for_sort(parse_version(y)))))
+    if args.update_latest:
+        dest_tag_latest = str_version(max_version([parse_version(t) for t in dest_tags_latest_sorted if t is not None]))
 
-    if args.verbose >= 3:
-        print('[DEBUG] Latest tags calculated (' + str(len(src_tags_latest)) + ' mappings):')
+    print('New calculated tags are:')
+    for dest_tag in dest_tags_latest_sorted:
+        print('- ' + dest_tag + ' \t-> ' + str_version(dest2src_tags_latest[dest_tag], use_original=True))
+    if args.update_latest:
+        print('- latest \t-> ' + str_version(dest2src_tags_latest[dest_tag_latest], use_original=True))
 
     dest_image = to_full_image_url(args.dest)
     dest_url = parse_image_url(args.dest)
@@ -230,19 +240,6 @@ def run_main_logic():
         for tag in sorted(dest_tags):
             print('  - ' + tag)
 
-    src_tags_sorted = [t for t in src_tags]
-    src_tags_sorted.sort(key=cmp_to_key(lambda x, y: compare_version(prepare_for_sort(x), prepare_for_sort(y))))
-    src_tags_latest_sorted = [t for t in src_tags_latest.keys()]
-    src_tags_latest_sorted.sort(key=cmp_to_key(lambda x, y: compare_version(None if x is None else prepare_for_sort(parse_version(x)), None if y is None else prepare_for_sort(parse_version(y)))))
-    if args.update_latest:
-        src_tag_latest = str_version(max_version([parse_version(t) for t in src_tags_latest_sorted if t is not None]))
-
-    print('New calculated tags are:')
-    for dest_tag in src_tags_latest_sorted:
-        print('- ' + dest_tag + ' \t-> ' + src_tags_latest[dest_tag])
-    if args.update_latest:
-        print('- latest \t-> ' + src_tags_latest[src_tag_latest])
-
     if not args.no_copy:
         # mirror all existing tags (use original tags from source)
         for src_tag_version in src_tags_sorted:
@@ -250,11 +247,11 @@ def run_main_logic():
             if not args.only_new_tags or not src_tag in dest_tags:
                 mirror_image_tag(src_tag)
 
-        for dest_tag in src_tags_latest_sorted:
+        for dest_tag in dest_tags_latest_sorted:
             if not args.only_new_tags or not dest_tag in dest_tags:
-                mirror_image_tag(src_tags_latest[dest_tag], dest_tag)
+                mirror_image_tag(str_version(dest2src_tags_latest[dest_tag], use_original=True), dest_tag)
         if args.update_latest:
-            mirror_image_tag(src_tags_latest[src_tag_latest], 'latest')
+            mirror_image_tag(str_version(dest2src_tags_latest[dest_tag_latest], use_original=True), 'latest')
 
 
 def exec(cmd, ignoreError=False, input=None):
@@ -584,8 +581,8 @@ def calculate_latest_tags(grouped_versions):
     """
     result = {}
     for k, versions in grouped_versions.items():
-        latest = str_version(max_version(versions))
-        if k != latest:
+        latest = max_version(versions)
+        if k != str_version(latest):
             result[k] = latest
     return result
 

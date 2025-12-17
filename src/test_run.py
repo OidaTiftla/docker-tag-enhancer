@@ -962,11 +962,11 @@ class TestCalculateLatestTags(unittest.TestCase):
         latest = run.calculate_latest_tags(grouped)
 
         expected = {
-            '14': '14.11.1',
-            '13': '13.14.0',
-            '14.10': '14.10.3',
-            '14.11': '14.11.1',
-            '13.14': '13.14.0',
+            '14': run.parse_version('14.11.1'),
+            '13': run.parse_version('13.14.0'),
+            '14.10': run.parse_version('14.10.3'),
+            '14.11': run.parse_version('14.11.1'),
+            '13.14': run.parse_version('13.14.0'),
         }
 
         self.assertEqual(latest, expected)
@@ -980,10 +980,10 @@ class TestCalculateLatestTags(unittest.TestCase):
         latest = run.calculate_latest_tags(grouped)
 
         expected = {
-            '7': '7.14.11.1',
-            '7.14': '7.14.11.1',
-            '7.14.10': '7.14.10.3',
-            '7.14.11': '7.14.11.1',
+            '7': run.parse_version('7.14.11.1'),
+            '7.14': run.parse_version('7.14.11.1'),
+            '7.14.10': run.parse_version('7.14.10.3'),
+            '7.14.11': run.parse_version('7.14.11.1'),
         }
 
         self.assertEqual(latest, expected)
@@ -997,11 +997,11 @@ class TestCalculateLatestTags(unittest.TestCase):
         latest = run.calculate_latest_tags(grouped)
 
         expected = {
-            '2': '2.7.14.11.1',
-            '2.7': '2.7.14.11.1',
-            '2.7.14': '2.7.14.11.1',
-            '2.7.14.10': '2.7.14.10.3',
-            '2.7.14.11': '2.7.14.11.1',
+            '2': run.parse_version('2.7.14.11.1'),
+            '2.7': run.parse_version('2.7.14.11.1'),
+            '2.7.14': run.parse_version('2.7.14.11.1'),
+            '2.7.14.10': run.parse_version('2.7.14.10.3'),
+            '2.7.14.11': run.parse_version('2.7.14.11.1'),
         }
 
         self.assertEqual(latest, expected)
@@ -1016,8 +1016,8 @@ class TestCalculateLatestTags(unittest.TestCase):
 
         # Non-RC version should be selected as latest
         expected = {
-            '14': '14.10.1',
-            '14.10': '14.10.1',
+            '14': run.parse_version('14.10.1'),
+            '14.10': run.parse_version('14.10.1'),
         }
 
         self.assertEqual(latest, expected)
@@ -1053,12 +1053,12 @@ class TestEndToEndTagCalculation(unittest.TestCase):
 
         # Verify expected tag mappings
         expected = {
-            '14': '14.11.1',      # Latest in major 14
-            '13': '13.14.0',      # Latest in major 13
-            '14.10': '14.10.3',   # Latest in 14.10.x
-            '14.11': '14.11.1',   # Latest in 14.11.x
-            '13.14': '13.14.0',   # Latest in 13.14.x
-            '13.13': '13.13.5',   # Latest in 13.13.x
+            '14': run.parse_version('14.11.1'),      # Latest in major 14
+            '13': run.parse_version('13.14.0'),      # Latest in major 13
+            '14.10': run.parse_version('14.10.3'),   # Latest in 14.10.x
+            '14.11': run.parse_version('14.11.1'),   # Latest in 14.11.x
+            '13.14': run.parse_version('13.14.0'),   # Latest in 13.14.x
+            '13.13': run.parse_version('13.13.5'),   # Latest in 13.13.x
         }
 
         self.assertEqual(src_tags_latest, expected)
@@ -1144,13 +1144,13 @@ class TestEndToEndTagCalculation(unittest.TestCase):
 
         # Verify expected tag mappings
         expected = {
-            '7': '7.14.11.1',
-            '7.14': '7.14.11.1',
-            '7.13': '7.13.14.0',
-            '7.14.10': '7.14.10.3',
-            '7.14.11': '7.14.11.1',
-            '7.13.13': '7.13.13.5',
-            '7.13.14': '7.13.14.0',
+            '7': run.parse_version('7.14.11.1'),
+            '7.14': run.parse_version('7.14.11.1'),
+            '7.13': run.parse_version('7.13.14.0'),
+            '7.14.10': run.parse_version('7.14.10.3'),
+            '7.14.11': run.parse_version('7.14.11.1'),
+            '7.13.13': run.parse_version('7.13.13.5'),
+            '7.13.14': run.parse_version('7.13.14.0'),
         }
 
         self.assertEqual(src_tags_latest, expected)
@@ -1175,14 +1175,14 @@ class TestEndToEndTagCalculation(unittest.TestCase):
 
         # Verify expected tag mappings
         expected = {
-            '2': '2.7.14.11.1',
-            '2.7': '2.7.14.11.1',
-            '2.7.14': '2.7.14.11.1',
-            '2.7.13': '2.7.13.14.0',
-            '2.7.14.10': '2.7.14.10.3',
-            '2.7.14.11': '2.7.14.11.1',
-            '2.7.13.13': '2.7.13.13.5',
-            '2.7.13.14': '2.7.13.14.0',
+            '2': run.parse_version('2.7.14.11.1'),
+            '2.7': run.parse_version('2.7.14.11.1'),
+            '2.7.14': run.parse_version('2.7.14.11.1'),
+            '2.7.13': run.parse_version('2.7.13.14.0'),
+            '2.7.14.10': run.parse_version('2.7.14.10.3'),
+            '2.7.14.11': run.parse_version('2.7.14.11.1'),
+            '2.7.13.13': run.parse_version('2.7.13.13.5'),
+            '2.7.13.14': run.parse_version('2.7.13.14.0'),
         }
 
         self.assertEqual(src_tags_latest, expected)
@@ -1210,14 +1210,14 @@ class TestEndToEndTagCalculation(unittest.TestCase):
         # 14.11.2.0 should be max for 14 (highest minor.patch combination)
         # For 14.10 with same patch, 14.10.2 wins (no build > with build, like major.minor logic)
         expected = {
-            '14': '14.11.2.0',
-            '13': '13.14.0.0.1',
-            '14.10': '14.10.2',
-            '14.11': '14.11.2.0',
-            '13.14': '13.14.0.0.1',
-            '13.14.0': '13.14.0.0.1',
-            '13.14.0.0': '13.14.0.0.1',
-            '14.11.2': '14.11.2.0',
+            '14': run.parse_version('14.11.2.0'),
+            '13': run.parse_version('13.14.0.0.1'),
+            '14.10': run.parse_version('14.10.2'),
+            '14.11': run.parse_version('14.11.2.0'),
+            '13.14': run.parse_version('13.14.0.0.1'),
+            '13.14.0': run.parse_version('13.14.0.0.1'),
+            '13.14.0.0': run.parse_version('13.14.0.0.1'),
+            '14.11.2': run.parse_version('14.11.2.0'),
         }
 
         self.assertEqual(src_tags_latest, expected)

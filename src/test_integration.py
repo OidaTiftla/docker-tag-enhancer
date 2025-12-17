@@ -900,10 +900,10 @@ class TestInverseSpecificityOrderIntegration(unittest.TestCase):
 
         # Should show the calculated tag mappings
         # Note: The cleanup patterns remove timestamps/SHA from calculated tag names,
-        # but original tags (with timestamps) are used when copying
-        self.assertIn("call('- test-v3 \\t-> test-v3.14.0')", printed_output)
-        self.assertIn("call('- test-v3.14 \\t-> test-v3.14.0')", printed_output)
-        self.assertIn("call('- test-v3.13 \\t-> test-v3.13.14')", printed_output)
+        # but original tags (with timestamps) are shown in output and used when copying
+        self.assertIn("call('- test-v3 \\t-> test-v3.14.0-2025-03-13T10-29-34-UTC-SHA-e1e8835c')", printed_output)
+        self.assertIn("call('- test-v3.14 \\t-> test-v3.14.0-2025-03-13T10-29-34-UTC-SHA-e1e8835c')", printed_output)
+        self.assertIn("call('- test-v3.13 \\t-> test-v3.13.14-2024-08-26T15-06-04-UTC-SHA-3a5f4ddc')", printed_output)
 
         # Verify that execWithRetry was called for copying images
         exec_calls = [str(call) for call in mock_exec_with_retry.call_args_list]
