@@ -808,7 +808,6 @@ class TestInverseSpecificityOrderIntegration(unittest.TestCase):
         # Set up args
         original_args = run.args
         run.args = MockArgs()
-        run.args.inverse_specificity_order = True
 
         # Parse versions with different specificity
         v3 = run.parse_version('14.10.2')
@@ -818,7 +817,7 @@ class TestInverseSpecificityOrderIntegration(unittest.TestCase):
         from functools import cmp_to_key
 
         versions = [v3, v4, v5]
-        sorted_versions = sorted(versions, key=cmp_to_key(run.compare_version))
+        sorted_versions = sorted(versions, key=cmp_to_key(lambda x, y: run.compare_version(x, y, inverse_specificity_order=True)))
 
         # With inverse order: 3-part < 4-part < 5-part (ascending order)
         self.assertEqual(run.str_version(sorted_versions[0]), '14.10.2')
@@ -826,7 +825,7 @@ class TestInverseSpecificityOrderIntegration(unittest.TestCase):
         self.assertEqual(run.str_version(sorted_versions[2]), '14.10.2.0.0')
 
         # The last element (greatest) should be the 5-part version
-        sorted_desc = sorted(versions, key=cmp_to_key(run.compare_version), reverse=True)
+        sorted_desc = sorted(versions, key=cmp_to_key(lambda x, y: run.compare_version(x, y, inverse_specificity_order=True)), reverse=True)
         self.assertEqual(run.str_version(sorted_desc[0]), '14.10.2.0.0')
 
         # Clean up

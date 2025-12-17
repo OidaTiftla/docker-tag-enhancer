@@ -458,7 +458,7 @@ def str_version(v, use_original=False):
     return (args.prefix or '') + version_str + ''.join(suffix_parts) + (args.suffix or '')
 
 
-def compare_version(v1, v2):
+def compare_version(v1, v2, inverse_specificity_order=False):
     if not v1 and not v2:
         return 0
     if not v1:
@@ -495,12 +495,12 @@ def compare_version(v1, v2):
             # v1 has more parts
             # Default behavior: less specific version is greater (v1 < v2, return -1)
             # Inverse behavior: more specific version is greater (v1 > v2, return 1)
-            return 1 if args.inverse_specificity_order else -1
+            return 1 if inverse_specificity_order else -1
         elif not has_p1 and has_p2:
             # v2 has more parts
             # Default behavior: less specific version is greater (v1 > v2, return 1)
             # Inverse behavior: more specific version is greater (v1 < v2, return -1)
-            return -1 if args.inverse_specificity_order else 1
+            return -1 if inverse_specificity_order else 1
 
     # Compare rc versions
     if v1['rc'] and v2['rc']:
@@ -531,7 +531,7 @@ def max_version(versions):
             latest = v
             continue
 
-        if compare_version(v, latest) > 0:
+        if compare_version(v, latest, inverse_specificity_order=args.inverse_specificity_order) > 0:
             latest = v
 
     return latest

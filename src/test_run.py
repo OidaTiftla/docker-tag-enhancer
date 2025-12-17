@@ -429,8 +429,6 @@ class TestInverseSpecificityOrder(unittest.TestCase):
     def setUp(self):
         self.original_args = run.args
         run.args = MockArgs()
-        # Enable inverse specificity order
-        run.args.inverse_specificity_order = True
 
     def tearDown(self):
         run.args = self.original_args
@@ -440,24 +438,24 @@ class TestInverseSpecificityOrder(unittest.TestCase):
         v1 = run.parse_version('14')
         v2 = run.parse_version('14.10')
         # With inverse order: more specific version (14.10) should be greater
-        self.assertEqual(run.compare_version(v1, v2), -1)
-        self.assertEqual(run.compare_version(v2, v1), 1)
+        self.assertEqual(run.compare_version(v1, v2, inverse_specificity_order=True), -1)
+        self.assertEqual(run.compare_version(v2, v1, inverse_specificity_order=True), 1)
 
     def test_compare_four_part_vs_three_part_inverse(self):
         """Test comparing 4-part vs 3-part versions (inverse order)"""
         v1 = run.parse_version('1.2.3')
         v2 = run.parse_version('1.2.3.4')
         # With inverse order: 1.2.3.4 (more specific) should be greater
-        self.assertEqual(run.compare_version(v1, v2), -1)
-        self.assertEqual(run.compare_version(v2, v1), 1)
+        self.assertEqual(run.compare_version(v1, v2, inverse_specificity_order=True), -1)
+        self.assertEqual(run.compare_version(v2, v1, inverse_specificity_order=True), 1)
 
     def test_compare_five_part_vs_four_part_inverse(self):
         """Test comparing 5-part vs 4-part versions (inverse order)"""
         v1 = run.parse_version('1.2.3.4')
         v2 = run.parse_version('1.2.3.4.5')
         # With inverse order: 1.2.3.4.5 (more specific) should be greater
-        self.assertEqual(run.compare_version(v1, v2), -1)
-        self.assertEqual(run.compare_version(v2, v1), 1)
+        self.assertEqual(run.compare_version(v1, v2, inverse_specificity_order=True), -1)
+        self.assertEqual(run.compare_version(v2, v1, inverse_specificity_order=True), 1)
 
     def test_compare_mixed_parts_same_base_inverse(self):
         """Test comparing versions with same base but different parts (inverse order)"""
@@ -466,56 +464,56 @@ class TestInverseSpecificityOrder(unittest.TestCase):
         v5 = run.parse_version('14.10.2.0.0')
 
         # With inverse order: 5-part > 4-part > 3-part (more specific is "greater")
-        self.assertEqual(run.compare_version(v3, v4), -1)
-        self.assertEqual(run.compare_version(v4, v5), -1)
-        self.assertEqual(run.compare_version(v3, v5), -1)
+        self.assertEqual(run.compare_version(v3, v4, inverse_specificity_order=True), -1)
+        self.assertEqual(run.compare_version(v4, v5, inverse_specificity_order=True), -1)
+        self.assertEqual(run.compare_version(v3, v5, inverse_specificity_order=True), -1)
 
         # Reverse comparisons
-        self.assertEqual(run.compare_version(v4, v3), 1)
-        self.assertEqual(run.compare_version(v5, v4), 1)
-        self.assertEqual(run.compare_version(v5, v3), 1)
+        self.assertEqual(run.compare_version(v4, v3, inverse_specificity_order=True), 1)
+        self.assertEqual(run.compare_version(v5, v4, inverse_specificity_order=True), 1)
+        self.assertEqual(run.compare_version(v5, v3, inverse_specificity_order=True), 1)
 
     def test_compare_equal_versions_inverse(self):
         """Test comparing equal versions still works with inverse order"""
         v1 = run.parse_version('14.10.2')
         v2 = run.parse_version('14.10.2')
-        self.assertEqual(run.compare_version(v1, v2), 0)
+        self.assertEqual(run.compare_version(v1, v2, inverse_specificity_order=True), 0)
 
     def test_compare_different_major_inverse(self):
         """Test comparing different major versions (should work same as default)"""
         v1 = run.parse_version('13.0.0')
         v2 = run.parse_version('14.0.0')
         # Major version comparison should work the same regardless of inverse flag
-        self.assertEqual(run.compare_version(v1, v2), -1)
-        self.assertEqual(run.compare_version(v2, v1), 1)
+        self.assertEqual(run.compare_version(v1, v2, inverse_specificity_order=True), -1)
+        self.assertEqual(run.compare_version(v2, v1, inverse_specificity_order=True), 1)
 
     def test_compare_different_minor_inverse(self):
         """Test comparing different minor versions (should work same as default)"""
         v1 = run.parse_version('14.9.0')
         v2 = run.parse_version('14.10.0')
         # Minor version comparison should work the same regardless of inverse flag
-        self.assertEqual(run.compare_version(v1, v2), -1)
-        self.assertEqual(run.compare_version(v2, v1), 1)
+        self.assertEqual(run.compare_version(v1, v2, inverse_specificity_order=True), -1)
+        self.assertEqual(run.compare_version(v2, v1, inverse_specificity_order=True), 1)
 
     def test_compare_different_patch_inverse(self):
         """Test comparing different patch versions (should work same as default)"""
         v1 = run.parse_version('14.10.1')
         v2 = run.parse_version('14.10.2')
         # Patch version comparison should work the same regardless of inverse flag
-        self.assertEqual(run.compare_version(v1, v2), -1)
-        self.assertEqual(run.compare_version(v2, v1), 1)
+        self.assertEqual(run.compare_version(v1, v2, inverse_specificity_order=True), -1)
+        self.assertEqual(run.compare_version(v2, v1, inverse_specificity_order=True), 1)
 
     def test_compare_rc_versions_inverse(self):
         """Test comparing RC versions (should work same as default)"""
         v1 = run.parse_version('14.10.0-rc1')
         v2 = run.parse_version('14.10.0-rc2')
         # RC comparison should work the same regardless of inverse flag
-        self.assertEqual(run.compare_version(v1, v2), -1)
+        self.assertEqual(run.compare_version(v1, v2, inverse_specificity_order=True), -1)
 
         # RC should be less than non-RC
         v3 = run.parse_version('14.10.0')
-        self.assertEqual(run.compare_version(v1, v3), -1)
-        self.assertEqual(run.compare_version(v3, v1), 1)
+        self.assertEqual(run.compare_version(v1, v3, inverse_specificity_order=True), -1)
+        self.assertEqual(run.compare_version(v3, v1, inverse_specificity_order=True), 1)
 
     def test_compare_three_vs_four_vs_five_parts_inverse(self):
         """Test comparing 3, 4, and 5-part versions (inverse order)"""
@@ -524,14 +522,14 @@ class TestInverseSpecificityOrder(unittest.TestCase):
         v5 = run.parse_version('1.2.3.4.5')
 
         # With inverse order: 5-part > 4-part > 3-part
-        self.assertEqual(run.compare_version(v3, v4), -1)
-        self.assertEqual(run.compare_version(v4, v5), -1)
-        self.assertEqual(run.compare_version(v3, v5), -1)
+        self.assertEqual(run.compare_version(v3, v4, inverse_specificity_order=True), -1)
+        self.assertEqual(run.compare_version(v4, v5, inverse_specificity_order=True), -1)
+        self.assertEqual(run.compare_version(v3, v5, inverse_specificity_order=True), -1)
 
         # Ensure consistency in reverse
-        self.assertEqual(run.compare_version(v5, v4), 1)
-        self.assertEqual(run.compare_version(v4, v3), 1)
-        self.assertEqual(run.compare_version(v5, v3), 1)
+        self.assertEqual(run.compare_version(v5, v4, inverse_specificity_order=True), 1)
+        self.assertEqual(run.compare_version(v4, v3, inverse_specificity_order=True), 1)
+        self.assertEqual(run.compare_version(v5, v3, inverse_specificity_order=True), 1)
 
 
 class TestVersionString(unittest.TestCase):
