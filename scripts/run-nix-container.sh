@@ -11,11 +11,6 @@ DOCKERFILE_PATH="${PROJECT_ROOT}/${DOCKERFILE_REL}"
 # if container with the same name exists, reuse it
 if [[ "$(docker ps -a -q -f name=${CONTAINER_NAME})" ]]; then
   echo "Reusing existing container ${CONTAINER_NAME}..."
-  # ensure container is running
-  if [[ ! "$(docker ps -q -f name=${CONTAINER_NAME})" ]]; then
-    docker start "${CONTAINER_NAME}"
-  fi
-  exec docker exec -it "${CONTAINER_NAME}" "${@:-/bin/bash}"
 else
   if [[ ! -f "${DOCKERFILE_PATH}" ]]; then
     echo "Dockerfile not found at ${DOCKERFILE_PATH}" >&2
@@ -25,7 +20,11 @@ else
   echo "Building ${IMAGE_NAME} from ${DOCKERFILE_REL}..."
   docker build -f "${DOCKERFILE_PATH}" -t "${IMAGE_NAME}" "${PROJECT_ROOT}"
 
-  echo "Launching container ${CONTAINER_NAME} (terminal-only)..."
+  # ensure nix is installed on the host
+  if ! command -v nix &> /dev/null; then
+    echo "Nix is not installed on the host. Please install Nix before running this script." >&2
+    exit 1
+  fi
 
   echo "Creating new container ${CONTAINER_NAME}..."
   mkdir -p "${HOME}/.codex"
@@ -33,8 +32,9 @@ else
   mkdir -p "${HOME}/.config/ccstatusline"
   touch "${HOME}/.claude.json"
   touch "${HOME}/.claude.json.backup"
-  exec docker run -it \
+  docker run -it \
     --name "${CONTAINER_NAME}" \
+    -v source=/nix,target=/nix,type=bind,consistency=consistent \
     -v "${PROJECT_ROOT}:/workspace" \
     -v "${HOME}/.codex:/home/ubuntu/.codex" \
     -v "${HOME}/.claude:/home/ubuntu/.claude" \
@@ -42,6 +42,15 @@ else
     -v "${HOME}/.claude.json:/home/ubuntu/.claude.json" \
     -v "${HOME}/.claude.json.backup:/home/ubuntu/.claude.json.backup" \
     -w /workspace \
+    -d \
     "${IMAGE_NAME}" \
-    "${@:-/bin/bash}"
+    "/bin/bash"
 fi
+
+echo "Connecting to container ${CONTAINER_NAME} (terminal-only)..."
+
+# ensure container is running
+if [[ ! "$(docker ps -q -f name=${CONTAINER_NAME})" ]]; then
+  docker start "${CONTAINER_NAME}"
+fi
+docker exec -it "${CONTAINER_NAME}" "${@:-/bin/bash}"
