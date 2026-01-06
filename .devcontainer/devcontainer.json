@@ -11,6 +11,9 @@
 		"ghcr.io/devcontainers/features/nix:1": {},
 		"ghcr.io/jsburckhardt/devcontainer-features/skopeo:1": {}
 	},
+	"mounts": [
+		"source=/nix,target=/nix,type=bind"
+	],
 
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
 	// "forwardPorts": [],
