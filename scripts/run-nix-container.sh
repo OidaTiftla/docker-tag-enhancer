@@ -34,7 +34,7 @@ else
   touch "${HOME}/.claude.json.backup"
   docker run -it \
     --name "${CONTAINER_NAME}" \
-    -v source=/nix,target=/nix,type=bind,consistency=consistent \
+    -v /nix:/nix \
     -v "${PROJECT_ROOT}:/workspace" \
     -v "${HOME}/.codex:/home/ubuntu/.codex" \
     -v "${HOME}/.claude:/home/ubuntu/.claude" \

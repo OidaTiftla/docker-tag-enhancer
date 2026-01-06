@@ -41,9 +41,8 @@ SHELL ["/bin/bash", "-c"]
 
 # Install Nix in single-user (--no-daemon) mode and enable flakes/related tooling by default.
 RUN curl -L https://nixos.org/nix/install -o /tmp/install-nix.sh \
-    && sudo -u ${USERNAME} sh /tmp/install-nix.sh --no-daemon \
-    && rm /tmp/install-nix.sh \
-    && echo ". ${HOME}/.nix-profile/etc/profile.d/nix.sh" >> ${HOME}/.bashrc
+    && sudo -u ${USERNAME} sh /tmp/install-nix.sh --daemon \
+    && rm /tmp/install-nix.sh
 
 WORKDIR /workspace
 CMD ["/bin/bash"]
