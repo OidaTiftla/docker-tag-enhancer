@@ -40,13 +40,13 @@ else
   docker run -it \
     --name "${CONTAINER_NAME}" \
     ${VOLUME_MOUNT_FOR_NIX} \
-    -v "${PROJECT_ROOT}:/workspace" \
+    -v "${PROJECT_ROOT}:/workspace/${PROJECT_NAME}" \
     -v "${HOME}/.codex:/home/ubuntu/.codex" \
     -v "${HOME}/.claude:/home/ubuntu/.claude" \
     -v "${HOME}/.config/ccstatusline:/home/ubuntu/.config/ccstatusline" \
     -v "${HOME}/.claude.json:/home/ubuntu/.claude.json" \
     -v "${HOME}/.claude.json.backup:/home/ubuntu/.claude.json.backup" \
-    -w /workspace \
+    -w /workspace/${PROJECT_NAME} \
     -d \
     "${IMAGE_NAME}" \
     "/bin/bash"
