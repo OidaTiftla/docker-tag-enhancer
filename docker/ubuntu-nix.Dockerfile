@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.20
-FROM python:3.14.2-slim
+FROM ubuntu:24.04
 
-LABEL org.opencontainers.image.description="Python base image with Nix package manager preinstalled"
+LABEL org.opencontainers.image.description="Ubuntu base image with Nix package manager preinstalled"
 
 ENV DEBIAN_FRONTEND=noninteractive \
     TZ=Etc/UTC
@@ -15,8 +15,6 @@ RUN apt-get update \
       locales \
       xz-utils \
       sudo \
-      skopeo \
-      jq \
     && rm -rf /var/lib/apt/lists/* \
     && locale-gen en_US.UTF-8
 
@@ -27,8 +25,6 @@ ARG USERNAME=ubuntu
 ARG USER_UID=1000
 ARG USER_GID=1000
 
-RUN groupadd --gid ${USER_GID} ${USERNAME} \
-    && useradd --uid ${USER_UID} --gid ${USER_GID} -m ${USERNAME}
 RUN echo "${USERNAME} ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers.d/${USERNAME} \
     && mkdir -p /nix \
     && chown ${USERNAME}:${USERNAME} /nix

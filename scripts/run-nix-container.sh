@@ -21,9 +21,14 @@ else
   docker build -f "${DOCKERFILE_PATH}" -t "${IMAGE_NAME}" "${PROJECT_ROOT}"
 
   # ensure nix is installed on the host
-  if ! command -v nix &> /dev/null; then
-    echo "Nix is not installed on the host. Please install Nix before running this script." >&2
-    exit 1
+  VOLUME_MOUNT_FOR_NIX=""
+  if command -v nix &> /dev/null; then
+    # Nix is installed, mount /nix from host to container if host uses Nix with multi-user installation
+    if [ -d "/nix" ]; then
+      nix-shell -p nix-info --run "nix-info -m" | grep 'multi-user' | grep -q 'yes' && \
+        echo "Mounting /nix from host to container to share Nix store" && \
+        VOLUME_MOUNT_FOR_NIX="-v /nix:/nix"
+    fi
   fi
 
   echo "Creating new container ${CONTAINER_NAME}..."
@@ -34,7 +39,7 @@ else
   touch "${HOME}/.claude.json.backup"
   docker run -it \
     --name "${CONTAINER_NAME}" \
-    -v /nix:/nix \
+    ${VOLUME_MOUNT_FOR_NIX} \
     -v "${PROJECT_ROOT}:/workspace" \
     -v "${HOME}/.codex:/home/ubuntu/.codex" \
     -v "${HOME}/.claude:/home/ubuntu/.claude" \

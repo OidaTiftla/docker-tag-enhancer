@@ -14,4 +14,4 @@ if (( ${#escaped_args[@]} )); then
     cmd+=" $joined"
 fi
 
-NIXPKGS_ALLOW_UNFREE=1 nix-shell -p claude-code --run "$cmd"
+NIXPKGS_ALLOW_UNFREE=1 nix-shell -p claude-code python314 skopeo jq --run "$cmd"
