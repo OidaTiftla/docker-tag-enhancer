@@ -73,3 +73,9 @@ The project includes a comprehensive test suite covering critical functionality.
 # Run all tests
 ./test.sh
 ```
+
+And the project uses `venv`. You can create a virtual environment with the following commands:
+
+- `python -m venv venv`
+- `source venv/bin/activate`
+- `pip install -r src/requirements.txt`
