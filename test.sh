@@ -6,21 +6,21 @@ set -e
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
 # Activate virtual environment if it exists and is not already activated
-if [ -n "$VIRTUAL_ENV" ] && [ "$VIRTUAL_ENV" != "$SCRIPT_DIR/venv" ]; then
+if [ -n "$VIRTUAL_ENV" ] && [ "$VIRTUAL_ENV" != "$SCRIPT_DIR/.venv" ]; then
     echo "Warning: A different virtual environment is already activated."
     echo "Please deactivate it first by running 'deactivate' and then rerun this script."
     exit 1
 fi
-if [ -f "$SCRIPT_DIR/venv/bin/activate" ]; then
+if [ -f "$SCRIPT_DIR/.venv/bin/activate" ]; then
     if [ -z "$VIRTUAL_ENV" ]; then
         echo "Activating virtual environment..."
-        source "$SCRIPT_DIR/venv/bin/activate"
+        source "$SCRIPT_DIR/.venv/bin/activate"
     fi
 else
-    echo "No virtual environment found at $SCRIPT_DIR/venv. Please create one and install dependencies."
+    echo "No virtual environment found at $SCRIPT_DIR/.venv. Please create one and install dependencies."
     echo "You can create a virtual environment with the following commands:"
-    echo "  \$ python -m venv venv"
-    echo "  \$ source venv/bin/activate"
+    echo "  \$ python -m venv .venv"
+    echo "  \$ source .venv/bin/activate"
     echo "  \$ pip install -r src/requirements.txt"
     echo "Then rerun this script."
     echo "If you want to deactivate the virtual environment later, use:"
@@ -29,7 +29,7 @@ else
 fi
 
 echo ""
-echo "Installed packages:"
+echo "Installing packages..."
 pip install -r "$SCRIPT_DIR/src/requirements.txt"
 
 echo ""
