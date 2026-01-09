@@ -9,7 +9,6 @@ mkShell {
   ];
 
   shellHook = ''
-    echo "docker-tag-enhancer environment loaded"
     export PYTHONPATH="$PWD/src:$PYTHONPATH"
   '';
 }

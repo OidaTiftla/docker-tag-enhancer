@@ -8,21 +8,24 @@
 	// Features to add to the dev container. More info: https://containers.dev/features.
 	"features": {
 		"ghcr.io/devcontainers/features/nix:1": {
-			"multiUser": true,
-			"version": "2.32.1"
+			"multiUser": true
 		}
 	},
-	// Use the /nix mount when you have a shared Nix store on the host system.
-	// "mounts": [
-	// 	"source=/nix,target=/nix,type=bind"
-	// ],
+	"workspaceMount": "source=${localWorkspaceFolder},target=${localWorkspaceFolder},type=bind,consistency=cached",
+	"workspaceFolder": "${localWorkspaceFolder}",
+	"mounts": [
+		// Uncomment the next line to mount your worktree's parent git repository
+		// "source=${localWorkspaceFolder}/../your-parent-git,target=${localWorkspaceFolder}/../your-parent-git,type=bind,consistency=cached"
+		// Use the /nix mount when you have a shared Nix store on the host system.
+		// "source=/nix,target=/nix,type=bind"
+	],
 
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
 	// "forwardPorts": [],
 
 	// Use 'postCreateCommand' to run commands after the container is created.
 	// "postCreateCommand": "pip3 install --user -r requirements.txt",
-	"postCreateCommand": "(command -v direnv >/dev/null 2>&1 || sudo apt update && sudo apt install -y direnv) && (test -f .envrc || echo 'use flake . --impure' >> .envrc) && direnv allow",
+	"postCreateCommand": "./.devcontainer/post-create.sh",
 
 	// Configure tool-specific properties.
 	"customizations": {
@@ -41,9 +44,8 @@
 				"chrmarti.regex"
 			]
 		}
-	},
+	}
 
 	// Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
 	// "remoteUser": "root"
-	"remoteUser": "ubuntu"
 }
