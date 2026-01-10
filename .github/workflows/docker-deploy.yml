@@ -109,6 +109,10 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Prepare README for Docker Hub
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        run: sed -i '/^## Development/,$d' ./README.md
+
       - name: Update Docker Hub description
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         uses: peter-evans/dockerhub-description@v5
