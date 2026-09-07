@@ -1,0 +1,9 @@
+{
+  "features": {
+    "ghcr.io/jsburckhardt/devcontainer-features/skopeo:1": {
+      "version": "1.0.0",
+      "resolved": "ghcr.io/jsburckhardt/devcontainer-features/skopeo@sha256:0e89cc402c8d8110de452769c5030abae37f5ce157f65b087c96e5729f01cdc5",
+      "integrity": "sha256:0e89cc402c8d8110de452769c5030abae37f5ce157f65b087c96e5729f01cdc5"
+    }
+  }
+}

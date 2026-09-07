@@ -26,6 +26,7 @@ class MockArgs:
         self.registry_token = None
         self.login = False
         self.inverse_specificity_order = False
+        self.allow_leading_zeros = False
         self.verbose = 0
 
 

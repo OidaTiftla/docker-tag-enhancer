@@ -27,6 +27,14 @@ docker run --rm -it -v ~/.docker/config.json:/root/.docker/config.json oidatiftl
 docker run --rm -it -v ~/.docker/config.json:/root/.docker/config.json oidatiftla/docker-tag-enhancer -s registry.example.com/name1 -d registry.example.com/name2 -f '^((?!-rc|^8\.|^9\.|^10\.|^11\.|^12\.).)*$'
 ```
 
+### With leading-zero version components (e.g. zero-padded timestamps)
+
+By default, version components must not have leading zeros (`0`, `1`, `2`, ... `9`, `10`, ... but not `01`). Use `--allow-leading-zeros` if your tags contain zero-padded numbers, e.g. `0.2609.0611.1310`.
+
+```bash
+docker run --rm -it -v ~/.docker/config.json:/root/.docker/config.json oidatiftla/docker-tag-enhancer -s registry.example.com/name1 -d registry.example.com/name2 --allow-leading-zeros
+```
+
 ### GitHub Container Registry (GHCR) read existing tags
 
 For some reason ([source](https://github.com/orgs/community/discussions/26279#discussioncomment-3251172), [source](https://github.com/orgs/community/discussions/26279#discussioncomment-10658026)) the `GITHUB_TOKEN` needs to be encoded with `base64`:

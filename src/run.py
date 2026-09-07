@@ -24,6 +24,7 @@ parser.add_argument('--prefix', type=str, help='A prefix of the tags to process.
 parser.add_argument('--suffix', type=str, help='A suffix of the tags to process.')
 parser.add_argument('-f', '--filter', type=str, help='A regex to filter the tags to process.')
 parser.add_argument('-c', '--tag-cleanup-pattern', action='append', dest='tag_cleanup_patterns', help='Regex pattern to clean up tags before version extraction. Can be specified multiple times. Supports sed-like syntax with capture groups: s/pattern/replacement/ (use $1, $2, etc. for captures) or just pattern (removes match). Examples: -c "-\\d{4}-.*" or -c "s/v(\\d+)-(\\d+)-(\\d+)/$1.$2.$3/"')
+parser.add_argument('--allow-leading-zeros', action='store_true', help='Allow version number components (major, minor, patch, rc, ce) to have leading zeros, e.g. for tags containing zero-padded timestamps.')
 parser.add_argument('--only-new-tags', action='store_true', help='Only push new tags to destination.')
 parser.add_argument('--update-latest', action='store_true', help='Calculate and update the \'latest\' tag.')
 parser.add_argument('--no-copy', action='store_true', help='Skip the copy operation.')
@@ -403,9 +404,10 @@ def parse_version(text, original_tag=None):
             return None
         text = text[:len(text) - len(args.suffix)]
 
+    num = r'\d+' if args.allow_leading_zeros else r'0|[1-9]\d*'
     # Parse version parts (1 or more numeric parts separated by dots)
     # Followed by optional -rc/-ce/-rest suffixes
-    m = re.search(r'^(?P<parts>(?:0|[1-9]\d*)(?:\.(?:0|[1-9]\d*))*)(-((rc(?P<rc>0|[1-9]\d*)\.)?ce\.(?P<ce>0|[1-9]\d*)|rc(?P<rc2>0|[1-9]\d*)))?(?P<rest>-.*)?$', text)
+    m = re.search(r'^(?P<parts>(?:' + num + r')(?:\.(?:' + num + r'))*)(-((rc(?P<rc>' + num + r')\.)?ce\.(?P<ce>' + num + r')|rc(?P<rc2>' + num + r')))?(?P<rest>-.*)?$', text)
     if not m:
         return None
     result = m.groupdict()
